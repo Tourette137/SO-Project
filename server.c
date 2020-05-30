@@ -35,9 +35,9 @@ int main(int argc, char const** argv)
         }
 
         while ((bytes_read = read(fd_fifo, buffer, MAX_ARG_SIZE)) > 0) {
-            printf("[DUBUG] received %s from client\n", buffer);
+            printf("[DEBUG] received '%s' from client\n", buffer);
             bzero(buffer, MAX_ARG_SIZE);
-        };
+        }
 
         close(fd_fifo);
     }
@@ -81,7 +81,7 @@ int exec_command (char* command)
     while (string != NULL) {
         if (realloc(exec_args, (i+1)*(sizeof(char*))) == NULL) { //Necessidade de fazer um realloc para aumentar o numero de argumentos de um mesmo comando
           perror("Realloc não executado");
-        };
+        }
         exec_args[i] = string;
         string = strtok(NULL, " ");
         i++;
@@ -98,7 +98,7 @@ int exec_command (char* command)
  * @brief           Função que executa uma lista de comandos em execução encadeada através de pipes
  * @return          Inteiro que revela se execução de comandos correu bem
  */
-int execut_Chained_Commands ()
+int execute_Chained_Commands ()
 {
     char buffer [MAX_ARG_SIZE];
     char* commands [MAX_COMMANDS]; //Tentar mudar de MAX_COMMANDS para um realloc que se ia fazendo ao longno do tempo
@@ -111,127 +111,126 @@ int execut_Chained_Commands ()
 
     n = read(0, buffer, MAX_ARG_SIZE);
     buffer[n-1] = '\0';
-    line = strdup(buffer);
+    line = buffer;
 
 
     command = strtok(line, "|");
     while(command != NULL) {
-      commands[number_of_commands++] = strdup(command);
-      command = strtok (NULL, "|");
+        commands[number_of_commands++] = strdup(command);
+        command = strtok (NULL, "|");
     }
 
 
-        if (number_of_commands == 1) {
+    if (number_of_commands == 1) {
 
-            switch (fork()) {
-                case -1:
-                    perror("Fork não foi efetuado");
+        switch (fork()) {
+            case -1:
+                perror("Fork");
+                return -1;
+            case 0:
+                exec_command(commands[0]);
+                _exit(0);
+        }
+
+    }
+    else {
+
+        for (int i = 0; i < number_of_commands; i++) {
+
+            if (i == 0) {
+
+                if (pipe(p[i]) != 0) {
+                    perror("Pipe");
                     return -1;
-                  case 0:
-                    exec_command(commands[0]);
-                    _exit(0);
-              }
+                }
 
-          } else {
+                switch(fork()) {
+                    case -1:
+                        perror("Fork");
+                        return -1;
+                    case 0:
+                        // codigo do filho 0
 
-                for (int i = 0; i < number_of_commands; i++) {
+                        close(p[i][0]);
 
-                    if (i == 0) {
+                        dup2(p[i][1],1);
+                        close(p[i][1]);
 
-                        if (pipe(p[i]) != 0) {
-                          perror("Pipe not created.");
-                          return -1;
-                        }
+                        exec_command(commands[i]);
+                        _exit(0);
 
-                        switch(fork()) {
-                            case -1:
-                                perror("Fork não foi efetuado");
-                                return -1;
-                              case 0:
-                                // codigo do filho 0
-
-                                close(p[i][0]);
-
-                                dup2(p[i][1],1);
-                                close(p[i][1]);
-
-                                exec_command(commands[i]);
-                                _exit(0);
-
-                              default:
-                                close(p[i][1]);
-                            }
+                        default:
+                            close(p[i][1]);
                     }
-                    else if (i == number_of_commands-1) {
+            }
+            else if (i == number_of_commands-1) {
 
-                        if (pipe(p[i]) != 0) {
-                          perror("Pipe not created.");
-                          return -1;
-                        }
+                if (pipe(p[i]) != 0) {
+                    perror("Pipe");
+                    return -1;
+                }
 
-                        switch(fork()) {
-                            case -1:
-                                perror("Fork não foi efetuado");
-                                return -1;
-                              case 0:
-                                // codigo do filho n-1
-                                //close(p[i-1][1]); //Já está fechado do anterior
+                switch(fork()) {
+                    case -1:
+                        perror("Fork");
+                        return -1;
+                    case 0:
+                        // codigo do filho n-1
+                        //close(p[i-1][1]); //Já está fechado do anterior
 
-                                dup2(p[i-1][0],0);
-                                close(p[i-1][0]);
+                        dup2(p[i-1][0],0);
+                        close(p[i-1][0]);
 
-                                exec_command(commands[i]);
+                        exec_command(commands[i]);
 
-                                _exit(0);
+                        _exit(0);
 
-                              default:
-                                close(p[i-1][0]);
-                            }
-                    }
-                    else {
-
-                        if (pipe(p[i]) != 0) {
-                          perror("Pipe not created.");
-                          return -1;
-                        }
-
-                        switch(fork()) {
-                            case -1:
-                                perror("Fork não foi efetuado");
-                                return -1;
-                              case 0:
-                                // codigo do filho i
-
-                                //close(p[i-1][1]); //Fechado no anterior
-                                close(p[i][0]);
-
-                                dup2(p[i][1],1);
-                                close(p[i][1]);
-
-                                dup2(p[i-1][0],0);
-                                  close(p[i-1][0]);
-
-                                exec_command(commands[i]);
-
-                                _exit(0);
-
-                              default:
-                                close(p[i][1]);
-                                close(p[i-1][0]);
-                            }
-                    }
+                    default:
+                        close(p[i-1][0]);
                 }
             }
+            else {
 
-            for (int w = 0; w < number_of_commands; w++) {
-              wait(&status[w]);
+                if (pipe(p[i]) != 0) {
+                    perror("Pipe");
+                    return -1;
+                }
+
+                switch(fork()) {
+                    case -1:
+                        perror("Fork");
+                        return -1;
+                    case 0:
+                        // codigo do filho i
+
+                        //close(p[i-1][1]); //Fechado no anterior
+                        close(p[i][0]);
+
+                        dup2(p[i][1],1);
+                        close(p[i][1]);
+
+                        dup2(p[i-1][0],0);
+                        close(p[i-1][0]);
+
+                        exec_command(commands[i]);
+
+                        _exit(0);
+
+                    default:
+                        close(p[i][1]);
+                        close(p[i-1][0]);
+                }
             }
+        }
+    }
 
-            for (int c = 0; c < number_of_commands; c++) {
-              free(commands[c]);
-            }
+    for (int w = 0; w < number_of_commands; w++) {
+        wait(&status[w]);
+    }
 
-            free(line);
+    for (int c = 0; c < number_of_commands; c++) {
+        free(commands[c]);
+    }
 
     return 0;
 }

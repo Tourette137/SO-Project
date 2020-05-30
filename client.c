@@ -22,7 +22,7 @@ int main(int argc, char const** argv)
 
     while ((bytes_read = readln(0, buffer, MAX_ARG_SIZE)) > 0) {
         write(fd_fifo, buffer, bytes_read);
-        printf("[DEBUG] wrote %s to fifo\n", buffer);
+        printf("[DEBUG] wrote '%s' to fifo\n", buffer);
     }
 
     close(fd_fifo);
