@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 
 #include "macros.h"
+#include "auxs.h"
 
 int main(int argc, char const** argv)
 {

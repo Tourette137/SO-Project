@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "auxs.h"
+
 ssize_t readln (int fd, char *buffer, size_t size) {
 
 	int resultado = 0, total = 0;
