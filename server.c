@@ -24,13 +24,18 @@ int main(int argc, char const** argv)
     while (1) {
         bzero(buffer, MAX_ARG_SIZE);
 
-        if ((fd_fifo = open(PIPENAME, O_RDONLY)) == -1)
-            perror("Open FIFO");
-        else
-            printf("[DEBUG] opened FIFO for reading\n");
+        if ((fd_fifo = open(PIPENAME, O_RDONLY)) == -1) {
+          perror("Open FIFO");
+          return -1;
+        }
+        else {
+          printf("[DEBUG] opened FIFO for reading\n");
+        }
 
-        bytes_read = read(fd_fifo, buffer, MAX_ARG_SIZE);
-        printf("[DUBUG] received %s from client\n", buffer);
+        while (bytes_read = read(fd_fifo, buffer, MAX_ARG_SIZE) > 0) {
+            printf("[DUBUG] received %s from client\n", buffer);
+            bzero(buffer, MAX_ARG_SIZE);
+        };
 
         close(fd_fifo);
     }
