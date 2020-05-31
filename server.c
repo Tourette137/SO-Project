@@ -11,10 +11,15 @@
 int max_inactivity_time = 10;
 int max_running_time = 10;
 
+void read_client_command(char* command);
+void changeMaxInactivityTime(int seconds);
+void changeMaxRunningTime(int seconds);
+int exec_command(char* command);
+int execute_Chained_Commands();
 
 int main(int argc, char const** argv)
 {
-    char buffer[MAX_ARG_SIZE];
+    char buffer[BUFFER_SIZE];
     int fd_fifo;
     ssize_t bytes_read;
 
@@ -24,7 +29,7 @@ int main(int argc, char const** argv)
 
     // Run cicle, waiting for input from the client
     while (1) {
-        bzero(buffer, MAX_ARG_SIZE);
+        bzero(buffer, BUFFER_SIZE);
 
         if ((fd_fifo = open(PIPENAME, O_RDONLY)) == -1) {
           perror("Open FIFO");
@@ -34,15 +39,36 @@ int main(int argc, char const** argv)
           printf("[DEBUG] opened FIFO for reading\n");
         }
 
-        while ((bytes_read = read(fd_fifo, buffer, MAX_ARG_SIZE)) > 0) {
+        while ((bytes_read = read(fd_fifo, buffer, BUFFER_SIZE)) > 0) {
+            read_client_command(buffer);
             printf("[DEBUG] received '%s' from client\n", buffer);
-            bzero(buffer, MAX_ARG_SIZE);
+            bzero(buffer, BUFFER_SIZE);
         }
 
         close(fd_fifo);
     }
 
     return 0;
+}
+
+/**
+ * @brief           Função que recebe um comando(simplificado), interpreta-o e executa-o
+ * @param command   Comando a ser interpretado e executado
+ */
+void read_client_command(char* command)
+{
+    if (strncmp(command, "-i ", 3) == 0) {
+        int n = atoi(command+3);
+        changeMaxInactivityTime(n);
+    }
+    else if (strncmp(command, "-m ", 3) == 0) {
+        int n = atoi(command+3);
+        changeMaxRunningTime(n);
+    }
+    else {
+        printf("Received invalid input from client\n");
+    }
+
 }
 
 
@@ -100,7 +126,7 @@ int exec_command (char* command)
  */
 int execute_Chained_Commands ()
 {
-    char buffer [MAX_ARG_SIZE];
+    char buffer [BUFFER_SIZE];
     char* commands [MAX_COMMANDS]; //Tentar mudar de MAX_COMMANDS para um realloc que se ia fazendo ao longno do tempo
     char* command;
     char* line;
@@ -109,7 +135,7 @@ int execute_Chained_Commands ()
     int number_of_commands = 0;
     int status[MAX_COMMANDS];
 
-    n = read(0, buffer, MAX_ARG_SIZE);
+    n = read(0, buffer, BUFFER_SIZE);
     buffer[n-1] = '\0';
     line = buffer;
 
