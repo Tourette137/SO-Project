@@ -24,12 +24,18 @@ int main(int argc, char const** argv)
         printf("[DEBUG] opened FIFO for writing\n");
 
     if (argc > 1) {
+        strcpy(buffer, argv[1]);
+        for (int i = 2; i < argc; i++) {
+            strcat(buffer, " ");
+            strcat(buffer, argv[i]);
+        }
 
+        write(fd_fifo, buffer, strlen(buffer));
     }
     else {
 
         write(1, "    $ ", 6);
-        while ((bytes_read = readln(0, buffer, BUFFER_SIZE)) > 0) {
+        while ((bytes_read = readln(0, buffer, BUFFER_SIZE)) > 0 && strcmp(buffer, "exit") != 0) {
             simplify_command(buffer, bytes_read);
 
             write(fd_fifo, buffer, bytes_read);
