@@ -7,11 +7,30 @@
 #include <sys/stat.h>
 
 #include "macros.h"
+#include "auxs.h"
+
+//TODO:
+//      - Server passar informação ao client, em vez de mandar para o stdout;
+//      - Alterar o estado de uma tarefa quando esta é terminada;
+//      - Usar o max_running_time e max_inactivity_time (bota SIGALRM nisto);
+//      - Usar o current_task tambem (pode ser o SIGALRM_handler a tratar da gestao das tarefas, i.e );
+//      - Apanhar a puta;
+
+typedef struct task {
+    char* command;
+    int status;
+}*TASK;
 
 int max_inactivity_time = 10;
 int max_running_time = 10;
+TASK* tasks_in_server = NULL;
+int current_task = -1, total_tasks_in_server = 0;
 
 void read_client_command(char* command);
+void print_server_running_tasks();
+void print_server_terminated_tasks();
+void print_help_menu();
+void add_task_to_server(char* command);
 void changeMaxInactivityTime(int seconds);
 void changeMaxRunningTime(int seconds);
 int exec_command(char* command);
@@ -40,13 +59,19 @@ int main(int argc, char const** argv)
         }
 
         while ((bytes_read = read(fd_fifo, buffer, BUFFER_SIZE)) > 0) {
-            read_client_command(buffer);
             printf("[DEBUG] received '%s' from client\n", buffer);
+            read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
         }
 
         close(fd_fifo);
     }
+
+    for (int i = 0; i < total_tasks_in_server; i++) {
+        free(tasks_in_server[i]->command);
+        free(tasks_in_server[i]);
+    }
+    free(tasks_in_server);
 
     return 0;
 }
@@ -57,18 +82,101 @@ int main(int argc, char const** argv)
  */
 void read_client_command(char* command)
 {
-    if (strncmp(command, "-i ", 3) == 0) {
+    if (strncmp(command, "-i", 2) == 0) {
         int n = atoi(command+3);
         changeMaxInactivityTime(n);
     }
-    else if (strncmp(command, "-m ", 3) == 0) {
+    else if (strncmp(command, "-m", 2) == 0) {
         int n = atoi(command+3);
         changeMaxRunningTime(n);
+    }
+    else if (strncmp(command, "-e", 2) == 0) {
+        char* aux = strdup(command+3);
+        char* perm = aux;
+
+        add_task_to_server(aux);
+        execute_Chained_Commands(aux);
+
+        free(perm);
+    }
+    else if (strncmp(command, "-l", 2) == 0) {
+        print_server_running_tasks();
+    }
+    else if (strncmp(command, "-t", 2) == 0) {
+
+    }
+    else if (strncmp(command, "-r", 2) == 0) {
+        print_server_terminated_tasks();
+    }
+    else if (strncmp(command, "-h", 2) == 0) {
+        print_help_menu();
     }
     else {
         printf("Received invalid input from client\n");
     }
 
+}
+
+/**
+ * @brief       Função que imprime as tarefas que estão a correr no servidor
+ */
+void print_server_running_tasks()
+{
+    for(int i = 0; i < total_tasks_in_server; i++) {
+        TASK aux_task = tasks_in_server[i];
+        if (aux_task->status == TASK_RUNNING) {
+            printf("#%d, ", i+1);
+
+            printf("%s\n", aux_task->command);
+        }
+    }
+}
+
+/**
+ * @brief       Função que imprime as tarefas que já terminaram de correr no servidor
+ */
+void print_server_terminated_tasks()
+{
+    for(int i = 0; i < total_tasks_in_server; i++) {
+        TASK aux_task = tasks_in_server[i];
+        if (aux_task->status != TASK_RUNNING) {
+            printf("#%d, ", i+1);
+
+            int aux_status = aux_task->status;
+            if (aux_status == TASK_TERMINATED) printf("concluida: ");
+            else if (aux_status == TASK_TERMINATED_INACTIVITY) printf("max inactividade: ");
+            else if (aux_status == TASK_TERMINATED_EXECUTION_TIME) printf("max execução: ");
+
+            printf("%s\n", aux_task->command);
+        }
+    }
+}
+
+/**
+ * @brief       Função que imprime o menu de ajuda para o utilizador
+ */
+void print_help_menu()
+{
+    printf("tempo-inactividade segs\n");
+    printf("tempo-execucao segs\n");
+    printf("executar p1 | p2 ... | pn\n");
+    printf("listar\n");
+    printf("terminar #tarefa\n");
+    printf("historico\n");
+}
+
+/**
+ * @brief           Função que adiciona uma tarefa ao registo de tarefas do servidor
+ * @param command   Comando da tarefa a ser adicionada ao servidor
+ */
+void add_task_to_server(char* command)
+{
+    total_tasks_in_server++;
+    tasks_in_server = realloc(tasks_in_server, total_tasks_in_server);
+    tasks_in_server[total_tasks_in_server-1] = malloc(sizeof(struct task));
+    TASK aux_task = tasks_in_server[total_tasks_in_server-1];
+    aux_task->command = strdup(command);
+    aux_task->status = TASK_RUNNING;
 }
 
 
@@ -124,29 +232,22 @@ int exec_command (char* command)
  * @brief           Função que executa uma lista de comandos em execução encadeada através de pipes
  * @return          Inteiro que revela se execução de comandos correu bem
  */
-int execute_Chained_Commands ()
+int execute_Chained_Commands (char* commands)
 {
-    char buffer [BUFFER_SIZE];
-    char* commands [MAX_COMMANDS]; //Tentar mudar de MAX_COMMANDS para um realloc que se ia fazendo ao longno do tempo
-    char* command;
     char* line;
-    int n;
-    int p[MAX_COMMANDS-1][2];
-    int number_of_commands = 0;
-    int status[MAX_COMMANDS];
+    int number_of_commands = strcnt(commands, '|') + 1;
+    char* commands_array[number_of_commands];
+    int status[number_of_commands];
+    int p[number_of_commands-1][2];
 
-    n = read(0, buffer, BUFFER_SIZE);
-    buffer[n-1] = '\0';
-    line = buffer;
-
-
-    command = strtok(line, "|");
-    while(command != NULL) {
-        commands[number_of_commands++] = strdup(command);
-        command = strtok (NULL, "|");
+    // Parsing da string com os comandos para um array com os comandos
+    line = strtok(commands, "|");
+    for(int i = 0; i < number_of_commands; i++) {
+        commands_array[i] = strdup(line);
+        line = strtok (NULL, "|");
     }
 
-
+    // Execução dos comandos
     if (number_of_commands == 1) {
 
         switch (fork()) {
@@ -154,7 +255,7 @@ int execute_Chained_Commands ()
                 perror("Fork");
                 return -1;
             case 0:
-                exec_command(commands[0]);
+                exec_command(commands_array[0]);
                 _exit(0);
         }
 
@@ -182,7 +283,7 @@ int execute_Chained_Commands ()
                         dup2(p[i][1],1);
                         close(p[i][1]);
 
-                        exec_command(commands[i]);
+                        exec_command(commands_array[i]);
                         _exit(0);
 
                         default:
@@ -207,7 +308,7 @@ int execute_Chained_Commands ()
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
-                        exec_command(commands[i]);
+                        exec_command(commands_array[i]);
 
                         _exit(0);
 
@@ -238,7 +339,7 @@ int execute_Chained_Commands ()
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
-                        exec_command(commands[i]);
+                        exec_command(commands_array[i]);
 
                         _exit(0);
 
@@ -250,12 +351,13 @@ int execute_Chained_Commands ()
         }
     }
 
+    // Processo pai espera que os processos filhos acabem o trabalho
     for (int w = 0; w < number_of_commands; w++) {
         wait(&status[w]);
     }
 
     for (int c = 0; c < number_of_commands; c++) {
-        free(commands[c]);
+        free(commands_array[c]);
     }
 
     return 0;

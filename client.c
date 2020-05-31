@@ -31,6 +31,7 @@ int main(int argc, char const** argv)
         }
 
         write(fd_fifo, buffer, strlen(buffer));
+        printf("[DEBUG] wrote '%s' to fifo\n", buffer);
     }
     else {
 
