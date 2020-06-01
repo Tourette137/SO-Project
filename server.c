@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <signal.h>
 
 #include "macros.h"
 #include "auxs.h"
@@ -13,7 +14,7 @@
 //      - Server passar informação ao client, em vez de mandar para o stdout;
 //      - Alterar o estado de uma tarefa quando esta é terminada;
 //      - Usar o max_running_time e max_inactivity_time (bota SIGALRM nisto);
-//      - Usar o current_task tambem (pode ser o SIGALRM_handler a tratar da gestao das tarefas, i.e );
+//      - Adicionar capacidade de executar várias tarefas em simultâneo
 //      - Apanhar a puta;
 
 typedef struct task {
@@ -24,7 +25,7 @@ typedef struct task {
 int max_inactivity_time = 10;
 int max_running_time = 10;
 TASK* tasks_in_server = NULL;
-int current_task = -1, total_tasks_in_server = 0;
+int current_task_ind = 0, total_tasks_in_server = 0;
 
 void read_client_command(char* command);
 void print_server_running_tasks();
@@ -36,8 +37,30 @@ void changeMaxRunningTime(int seconds);
 int exec_command(char* command);
 int execute_Chained_Commands();
 
+void SIGALRM_handler(int signum)
+{
+    if (current_task_ind < total_tasks_in_server && tasks_in_server[current_task_ind]->status != TASK_RUNNING) {
+
+        TASK current_task = tasks_in_server[current_task_ind];
+        current_task->status = TASK_RUNNING;
+        char* command = current_task->command;
+        execute_Chained_Commands(command);
+    }
+
+    alarm(1);
+}
+
+void SIGUSR1_handler(int signum)
+{
+    tasks_in_server[current_task_ind]->status = TASK_TERMINATED;
+    current_task_ind++;
+}
+
 int main(int argc, char const** argv)
 {
+    signal(SIGALRM, SIGALRM_handler);
+    signal(SIGUSR1, SIGUSR1_handler);
+
     char buffer[BUFFER_SIZE];
     int fd_fifo;
     ssize_t bytes_read;
@@ -48,6 +71,8 @@ int main(int argc, char const** argv)
 
     // Run cicle, waiting for input from the client
     while (1) {
+        alarm(1);
+
         bzero(buffer, BUFFER_SIZE);
 
         if ((fd_fifo = open(PIPENAME, O_RDONLY)) == -1) {
@@ -62,6 +87,7 @@ int main(int argc, char const** argv)
             printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
+            printf("[DEBUG] job done...\n");
         }
 
         close(fd_fifo);
@@ -91,13 +117,7 @@ void read_client_command(char* command)
         changeMaxRunningTime(n);
     }
     else if (strncmp(command, "-e", 2) == 0) {
-        char* aux = strdup(command+3);
-        char* perm = aux;
-
-        add_task_to_server(aux);
-        execute_Chained_Commands(aux);
-
-        free(perm);
+        add_task_to_server(command+3);
     }
     else if (strncmp(command, "-l", 2) == 0) {
         print_server_running_tasks();
@@ -114,7 +134,6 @@ void read_client_command(char* command)
     else {
         printf("Received invalid input from client\n");
     }
-
 }
 
 /**
@@ -124,9 +143,8 @@ void print_server_running_tasks()
 {
     for(int i = 0; i < total_tasks_in_server; i++) {
         TASK aux_task = tasks_in_server[i];
-        if (aux_task->status == TASK_RUNNING) {
-            printf("#%d, ", i+1);
-
+        if (aux_task->status == TASK_RUNNING || aux_task->status == TASK_WAITING) {
+            printf("#%d: ", i+1);
             printf("%s\n", aux_task->command);
         }
     }
@@ -139,7 +157,7 @@ void print_server_terminated_tasks()
 {
     for(int i = 0; i < total_tasks_in_server; i++) {
         TASK aux_task = tasks_in_server[i];
-        if (aux_task->status != TASK_RUNNING) {
+        if (aux_task->status != TASK_RUNNING && aux_task->status != TASK_WAITING) {
             printf("#%d, ", i+1);
 
             int aux_status = aux_task->status;
@@ -172,11 +190,11 @@ void print_help_menu()
 void add_task_to_server(char* command)
 {
     total_tasks_in_server++;
-    tasks_in_server = realloc(tasks_in_server, total_tasks_in_server);
+    tasks_in_server = realloc(tasks_in_server, total_tasks_in_server*sizeof(TASK));
     tasks_in_server[total_tasks_in_server-1] = malloc(sizeof(struct task));
     TASK aux_task = tasks_in_server[total_tasks_in_server-1];
     aux_task->command = strdup(command);
-    aux_task->status = TASK_RUNNING;
+    aux_task->status = TASK_WAITING;
 }
 
 
@@ -237,7 +255,6 @@ int execute_Chained_Commands (char* commands)
     char* line;
     int number_of_commands = strcnt(commands, '|') + 1;
     char* commands_array[number_of_commands];
-    int status[number_of_commands];
     int p[number_of_commands-1][2];
 
     // Parsing da string com os comandos para um array com os comandos
@@ -255,7 +272,16 @@ int execute_Chained_Commands (char* commands)
                 perror("Fork");
                 return -1;
             case 0:
-                exec_command(commands_array[0]);
+                switch (fork()) {
+                    case -1:
+                        perror("Fork:");
+                        return -1;
+                    case 0:
+                        exec_command(commands_array[0]);
+                }
+                int status;
+                wait(&status);
+                kill(getppid(), SIGUSR1);
                 _exit(0);
         }
 
@@ -308,10 +334,17 @@ int execute_Chained_Commands (char* commands)
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
-                        exec_command(commands_array[i]);
-
+                        switch (fork()) {
+                            case -1:
+                                perror("Fork:");
+                                return -1;
+                            case 0:
+                                exec_command(commands_array[i]);
+                        }
+                        int status;
+                        wait(&status);
+                        kill(getppid(), SIGUSR1);
                         _exit(0);
-
                     default:
                         close(p[i-1][0]);
                 }
@@ -349,11 +382,6 @@ int execute_Chained_Commands (char* commands)
                 }
             }
         }
-    }
-
-    // Processo pai espera que os processos filhos acabem o trabalho
-    for (int w = 0; w < number_of_commands; w++) {
-        wait(&status[w]);
     }
 
     for (int c = 0; c < number_of_commands; c++) {

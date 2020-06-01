@@ -4,6 +4,7 @@
 #define PIPENAME "server_pipe"
 
 // TASK STATUS MACROS
+#define TASK_WAITING -1
 #define TASK_TERMINATED 0
 #define TASK_RUNNING 1
 #define TASK_TERMINATED_INACTIVITY 2
