@@ -17,10 +17,10 @@
 //      - Apanhar a puta;
 
 int server_pid;
-int execution_seconds_passed = 0;
-int inactivity_seconds_passed = 0;
 int max_inactivity_time = 10;
+int current_inactivity_time = 0;
 int max_execution_time = 10;
+int current_execution_time = 0;
 TASK* tasks_history = NULL;
 int total_tasks_history = 0;
 TASK* tasks_running = NULL;
@@ -51,12 +51,15 @@ void SIGUSR1_handler(int signum)
                 switch (WEXITSTATUS(status)) {
                     case EXIT_STATUS_TERMINATED:
                         end_task_given(task_id-1, i, TASK_TERMINATED);
+                        printf("[DEBUG] job done with exit code TASK_TERMINATED\n");
                         break;
                     case EXIT_STATUS_INACTIVITY:
                         end_task_given(task_id-1, i, TASK_TERMINATED_INACTIVITY);
+                        printf("[DEBUG] job done with exit code TASK_TERMINATED_INACTIVITY\n");
                         break;
                     case EXIT_STATUS_EXECUTION_TIME:
                         end_task_given(task_id-1, i, TASK_TERMINATED_EXECUTION_TIME);
+                        printf("[DEBUG] job done with exit code TASK_TERMINATED_EXECUTION_TIME\n");
                         break;
                 }
             }
@@ -72,8 +75,8 @@ void SIGUSR1_handler(int signum)
  */
 void SIGALRM_handler_server_child(int signum)
 {
-    execution_seconds_passed++;
-    if (execution_seconds_passed == max_execution_time) {
+    current_execution_time++;
+    if (current_execution_time >= max_execution_time) {
         kill(getppid(), SIGUSR1);
         _exit(EXIT_STATUS_EXECUTION_TIME);
     }
@@ -87,8 +90,8 @@ void SIGALRM_handler_server_child(int signum)
  */
 void SIGALRM_handler_server_child_command(int signum)
 {
-    inactivity_seconds_passed++;
-    if (inactivity_seconds_passed >= max_inactivity_time) {
+    current_inactivity_time++;
+    if (current_inactivity_time >= max_inactivity_time) {
         _exit(EXIT_STATUS_INACTIVITY);
     }
 
@@ -99,7 +102,6 @@ void SIGALRM_handler_server_child_command(int signum)
 int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler);
-    //signal(SIGALRM, SIGALRM_handler);
 
     char buffer[BUFFER_SIZE];
     int fd_fifo;
@@ -203,7 +205,6 @@ void launch_task_on_server(char* command)
             signal(SIGALRM, SIGALRM_handler_server_child);
             if (execute_Chained_Commands(command, task_id) == -1)
                 perror("Execute task");
-            printf("[DEBUG] job done...\n");
             kill(getppid(), SIGUSR1);
             _exit(EXIT_STATUS_TERMINATED);
         default:
@@ -372,7 +373,6 @@ int execute_Chained_Commands (char* commands, int id)
         }
     }
     else {
-
         for (int i = 0; i < number_of_commands; i++) {
 
             if (i == 0) {
@@ -387,7 +387,7 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        //signal(SIGALRM, SIGALRM_handler_server_child_command);
                         alarm(1);
 
                         // codigo do filho 0
@@ -415,7 +415,7 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        //signal(SIGALRM, SIGALRM_handler_server_child_command);
                         alarm(1);
                         // codigo do filho n-1
                         //close(p[i-1][1]); //Já está fechado do anterior
@@ -441,7 +441,7 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        //signal(SIGALRM, SIGALRM_handler_server_child_command);
                         alarm(1);
                         // codigo do filho i
                         //close(p[i-1][1]); //Fechado no anterior
