@@ -17,6 +17,7 @@
 //      - Usar o max_running_time e max_inactivity_time (bota SIGALRM nisto);
 //      - Apanhar a puta;
 
+int seconds_passed = 0;
 int max_inactivity_time = 10;
 int max_running_time = 10;
 TASK* tasks_history = NULL;
@@ -32,17 +33,23 @@ void print_help_menu();
 void add_task_to_server(char* command);
 void changeMaxInactivityTime(int seconds);
 void changeMaxRunningTime(int seconds);
+void end_task_given (int task);
 int exec_command(char* command);
 int execute_Chained_Commands();
 
 void SIGUSR1_handler(int signum)
 {
-    int pid = wait(0);
-
+    int status;
+    int pid = waitpid(-1, &status, 0); //o waitpid aqui espera por qualquer processo filho que acabe (-1 no primeiro argumento)
     for(int i = 0; i < total_tasks_running; i++) {
         if(tasks_running[i]->pid == pid) {
             int task_ind = tasks_running[i]->id - 1;
-            tasks_history[task_ind]->status = TASK_TERMINATED;
+
+            if (WIFEXITED(status)) {
+                tasks_history[task_ind]->status = TASK_TERMINATED;
+            } else {
+                tasks_history[task_ind]->status = TASK_TERMINATED_INTERRUPTED;
+            }
 
             tasks_running[i] = tasks_running[total_tasks_running-1];
             total_tasks_running--;
@@ -51,9 +58,17 @@ void SIGUSR1_handler(int signum)
     }
 }
 
+void SIGALRM_handler(int signum)
+{
+    seconds_passed++;
+    alarm(1);
+}
+
+
 int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler);
+    signal(SIGALRM, SIGALRM_handler);
 
     char buffer[BUFFER_SIZE];
     int fd_fifo;
@@ -63,6 +78,7 @@ int main(int argc, char const** argv)
     if (mkfifo(PIPENAME, 0666) == -1)
         perror("Mkfifo");
 
+    alarm(1);
     // Run cicle, waiting for input from the client
     while (1) {
 
@@ -77,6 +93,7 @@ int main(int argc, char const** argv)
         }
 
         while ((bytes_read = read(fd_fifo, buffer, BUFFER_SIZE)) > 0) {
+            seconds_passed = 0;
             printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
@@ -119,7 +136,8 @@ void read_client_command(char* command)
         print_server_running_tasks();
     }
     else if (strncmp(command, "-t", 2) == 0) {
-
+        int n = atoi(command+3);
+        end_task_given(n);
     }
     else if (strncmp(command, "-r", 2) == 0) {
         print_server_terminated_tasks();
@@ -136,6 +154,7 @@ void launch_task_on_server(char* command)
 {
     int task_id = total_tasks_history;
     pid_t pid = fork();
+    int res;
 
     switch (pid) {
         case -1:
@@ -151,6 +170,7 @@ void launch_task_on_server(char* command)
             tasks_running[total_tasks_running-1]->pid = pid;
     }
 }
+
 
 /**
  * @brief       Função que imprime as tarefas que estão a correr no servidor
@@ -180,6 +200,7 @@ void print_server_terminated_tasks()
             if (aux_status == TASK_TERMINATED) printf("concluida: ");
             else if (aux_status == TASK_TERMINATED_INACTIVITY) printf("max inactividade: ");
             else if (aux_status == TASK_TERMINATED_EXECUTION_TIME) printf("max execução: ");
+            else if (aux_status == TASK_TERMINATED_INTERRUPTED) printf("interrumpida: ");
 
             printf("%s\n", aux_task->command);
         }
@@ -233,6 +254,20 @@ void changeMaxRunningTime (int seconds)
     max_running_time = seconds;
 }
 
+/**
+ * @brief           Função que acaba com uma Task que esteja a ser executada
+ * @param seconds   Tarefa que queremos terminar de maneira forçada
+ */
+
+void end_task_given (int taskNum)
+{
+    for (int i = 0; i < total_tasks_running; i++) {
+        if (tasks_running[i]->id == (taskNum)) {
+          kill(tasks_running[i]->pid, SIGKILL);
+          kill(getpid(), SIGUSR1);
+        }
+    }
+}
 
 
 /**
@@ -281,7 +316,7 @@ int execute_Chained_Commands (char* commands, int id)
         commands_array[i] = strdup(line);
         line = strtok (NULL, "|");
     }
-
+    sleep(10);
     // Execução dos comandos
     if (number_of_commands == 1) {
 
