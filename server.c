@@ -13,11 +13,12 @@
 
 //TODO:
 //      - Server passar informação ao client, em vez de mandar para o stdout;
-//      - Usar o max_execution_time e max_inactivity_time (bota SIGALRM nisto);
+//      - Usar o max_execution_time e max_inactivity_time (bota SIGALRM nisto); ESTÁ FEITO, MAS VERIFICAR
 //      - Apanhar a puta;
 
 int server_pid;
 int execution_seconds_passed = 0;
+int inactivity_seconds_passed = 0;
 int max_inactivity_time = 10;
 int max_execution_time = 10;
 TASK* tasks_history = NULL;
@@ -64,12 +65,31 @@ void SIGUSR1_handler(int signum)
     }
 }
 
+
+/**
+ * @brief           Handler do SIGALRM da tarefa de comandos encadeados por pipes a executar
+ * @param singum    Inteiro remetente ao tipo de sinal transmitido
+ */
 void SIGALRM_handler_server_child(int signum)
 {
     execution_seconds_passed++;
     if (execution_seconds_passed == max_execution_time) {
         kill(getppid(), SIGUSR1);
         _exit(EXIT_STATUS_EXECUTION_TIME);
+    }
+
+    alarm(1);
+}
+
+/**
+ * @brief           Handler do SIGALRM para os processos que executam um comandos da tarefa de comandos encadeados por pipes a executar
+ * @param singum    Inteiro remetente ao tipo de sinal transmitido
+ */
+void SIGALRM_handler_server_child_command(int signum)
+{
+    inactivity_seconds_passed++;
+    if (inactivity_seconds_passed >= max_inactivity_time) {
+        _exit(EXIT_STATUS_INACTIVITY);
     }
 
     alarm(1);
@@ -347,6 +367,8 @@ int execute_Chained_Commands (char* commands, int id)
             case 0:
                 exec_command(commands_array[0]);
                 _exit(0);
+            default:
+                wait(&status[0]);
         }
     }
     else {
@@ -365,8 +387,10 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        // codigo do filho 0
+                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        alarm(1);
 
+                        // codigo do filho 0
                         close(p[i][0]);
 
                         dup2(p[i][1],1);
@@ -376,6 +400,7 @@ int execute_Chained_Commands (char* commands, int id)
                         _exit(0);
                     default:
                         close(p[i][1]);
+
                 }
             }
             else if (i == number_of_commands-1) {
@@ -390,9 +415,10 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
+                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        alarm(1);
                         // codigo do filho n-1
                         //close(p[i-1][1]); //Já está fechado do anterior
-
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
@@ -400,6 +426,7 @@ int execute_Chained_Commands (char* commands, int id)
                         _exit(0);
                     default:
                         close(p[i-1][0]);
+
                 }
             }
             else {
@@ -414,8 +441,9 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
+                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        alarm(1);
                         // codigo do filho i
-
                         //close(p[i-1][1]); //Fechado no anterior
                         close(p[i][0]);
 
@@ -430,13 +458,19 @@ int execute_Chained_Commands (char* commands, int id)
                     default:
                         close(p[i][1]);
                         close(p[i-1][0]);
+
                 }
             }
-        }
-    }
 
-    for (int w = 0; w < number_of_commands; w++) {
-        wait(&status[w]);
+            wait(&status[i]);
+            if (WIFEXITED(status[i])) {
+                if (WEXITSTATUS(status[i]) == EXIT_STATUS_INACTIVITY) {
+                    kill(getppid(), SIGUSR1);
+                    _exit(EXIT_STATUS_INACTIVITY);
+                }
+            }
+
+        }
     }
 
     for (int c = 0; c < number_of_commands; c++) {
