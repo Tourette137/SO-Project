@@ -13,54 +13,65 @@
 
 //TODO:
 //      - Server passar informação ao client, em vez de mandar para o stdout;
-//      - Alterar o estado de uma tarefa quando esta é terminada;
-//      - Usar o max_running_time e max_inactivity_time (bota SIGALRM nisto);
+//      - Usar o max_execution_time e max_inactivity_time (bota SIGALRM nisto);
 //      - Apanhar a puta;
 
-int seconds_passed = 0;
+int server_pid;
+int execution_seconds_passed = 0;
 int max_inactivity_time = 10;
-int max_running_time = 10;
+int max_execution_time = 10;
 TASK* tasks_history = NULL;
 int total_tasks_history = 0;
 TASK* tasks_running = NULL;
 int total_tasks_running = 0;
 
-void launch_task_on_server(char* command);
-void read_client_command(char* command);
+void launch_task_on_server(char*);
+void read_client_command(char*);
 void print_server_running_tasks();
 void print_server_terminated_tasks();
 void print_help_menu();
-void add_task_to_server(char* command);
-void changeMaxInactivityTime(int seconds);
-void changeMaxRunningTime(int seconds);
-void end_task_given (int task);
-int exec_command(char* command);
-int execute_Chained_Commands();
+void add_task_to_server(char*);
+void changeMaxInactivityTime(int);
+void changeMaxExecutionTime(int);
+void end_task_given (int, int, int);
+int exec_command(char*);
+int execute_Chained_Commands(char*, int);
 
 void SIGUSR1_handler(int signum)
 {
     int status;
-    int pid = waitpid(-1, &status, 0); //o waitpid aqui espera por qualquer processo filho que acabe (-1 no primeiro argumento)
+    int pid = wait(&status);
+
     for(int i = 0; i < total_tasks_running; i++) {
         if(tasks_running[i]->pid == pid) {
-            int task_ind = tasks_running[i]->id - 1;
+            int task_id = tasks_running[i]->id;
 
             if (WIFEXITED(status)) {
-                tasks_history[task_ind]->status = TASK_TERMINATED;
-            } else {
-                tasks_history[task_ind]->status = TASK_TERMINATED_INTERRUPTED;
+                switch (WEXITSTATUS(status)) {
+                    case EXIT_STATUS_TERMINATED:
+                        end_task_given(task_id-1, i, TASK_TERMINATED);
+                        break;
+                    case EXIT_STATUS_INACTIVITY:
+                        end_task_given(task_id-1, i, TASK_TERMINATED_INACTIVITY);
+                        break;
+                    case EXIT_STATUS_EXECUTION_TIME:
+                        end_task_given(task_id-1, i, TASK_TERMINATED_EXECUTION_TIME);
+                        break;
+                }
             }
 
-            tasks_running[i] = tasks_running[total_tasks_running-1];
-            total_tasks_running--;
-            tasks_running = realloc(tasks_running, total_tasks_running);
         }
     }
 }
 
-void SIGALRM_handler(int signum)
+void SIGALRM_handler_server_child(int signum)
 {
-    seconds_passed++;
+    execution_seconds_passed++;
+    if (execution_seconds_passed == max_execution_time) {
+        kill(getppid(), SIGUSR1);
+        _exit(EXIT_STATUS_EXECUTION_TIME);
+    }
+
     alarm(1);
 }
 
@@ -68,17 +79,19 @@ void SIGALRM_handler(int signum)
 int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler);
-    signal(SIGALRM, SIGALRM_handler);
+    //signal(SIGALRM, SIGALRM_handler);
 
     char buffer[BUFFER_SIZE];
     int fd_fifo;
     ssize_t bytes_read;
 
+    // Store server PID for later use
+    server_pid = getpid();
+
     // Create pipe for communicating with the clients
     if (mkfifo(PIPENAME, 0666) == -1)
         perror("Mkfifo");
 
-    alarm(1);
     // Run cicle, waiting for input from the client
     while (1) {
 
@@ -93,7 +106,6 @@ int main(int argc, char const** argv)
         }
 
         while ((bytes_read = read(fd_fifo, buffer, BUFFER_SIZE)) > 0) {
-            seconds_passed = 0;
             printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
@@ -126,7 +138,7 @@ void read_client_command(char* command)
     }
     else if (strncmp(command, "-m", 2) == 0) {
         int n = atoi(command+3);
-        changeMaxRunningTime(n);
+        changeMaxExecutionTime(n);
     }
     else if (strncmp(command, "-e", 2) == 0) {
         add_task_to_server(command+3);
@@ -137,7 +149,15 @@ void read_client_command(char* command)
     }
     else if (strncmp(command, "-t", 2) == 0) {
         int n = atoi(command+3);
-        end_task_given(n);
+
+        for (int i = 0; i < total_tasks_running; i++) {
+            if (tasks_running[i]->id == n) {
+                kill(tasks_running[i]->pid, SIGKILL);
+                end_task_given(n-1, i, TASK_TERMINATED_INTERRUPTED);
+                break;
+            }
+        }
+
     }
     else if (strncmp(command, "-r", 2) == 0) {
         print_server_terminated_tasks();
@@ -154,18 +174,18 @@ void launch_task_on_server(char* command)
 {
     int task_id = total_tasks_history;
     pid_t pid = fork();
-    int res;
 
     switch (pid) {
         case -1:
             perror("Fork");
             return;
         case 0:
+            signal(SIGALRM, SIGALRM_handler_server_child);
             if (execute_Chained_Commands(command, task_id) == -1)
                 perror("Execute task");
             printf("[DEBUG] job done...\n");
             kill(getppid(), SIGUSR1);
-            _exit(0);
+            _exit(EXIT_STATUS_TERMINATED);
         default:
             tasks_running[total_tasks_running-1]->pid = pid;
     }
@@ -200,7 +220,7 @@ void print_server_terminated_tasks()
             if (aux_status == TASK_TERMINATED) printf("concluida: ");
             else if (aux_status == TASK_TERMINATED_INACTIVITY) printf("max inactividade: ");
             else if (aux_status == TASK_TERMINATED_EXECUTION_TIME) printf("max execução: ");
-            else if (aux_status == TASK_TERMINATED_INTERRUPTED) printf("interrumpida: ");
+            else if (aux_status == TASK_TERMINATED_INTERRUPTED) printf("interrompida: ");
 
             printf("%s\n", aux_task->command);
         }
@@ -249,9 +269,9 @@ void changeMaxInactivityTime (int seconds)
  * @brief           Função que altera o tempo de Execução Máxima de uma Tarefa
  * @param seconds   Tempo em segundos que queremos que seja o tempo de execução máxima de uma tarefa
  */
-void changeMaxRunningTime (int seconds)
+void changeMaxExecutionTime (int seconds)
 {
-    max_running_time = seconds;
+    max_execution_time = seconds;
 }
 
 /**
@@ -259,14 +279,13 @@ void changeMaxRunningTime (int seconds)
  * @param seconds   Tarefa que queremos terminar de maneira forçada
  */
 
-void end_task_given (int taskNum)
+void end_task_given (int task_ind, int task_running_ind, int terminated_status)
 {
-    for (int i = 0; i < total_tasks_running; i++) {
-        if (tasks_running[i]->id == (taskNum)) {
-          kill(tasks_running[i]->pid, SIGKILL);
-          kill(getpid(), SIGUSR1);
-        }
-    }
+    tasks_history[task_ind]->status = terminated_status;
+
+    tasks_running[task_running_ind] = tasks_running[total_tasks_running-1];
+    total_tasks_running--;
+    tasks_running = realloc(tasks_running, total_tasks_running);
 }
 
 
@@ -316,7 +335,8 @@ int execute_Chained_Commands (char* commands, int id)
         commands_array[i] = strdup(line);
         line = strtok (NULL, "|");
     }
-    sleep(10);
+
+    alarm(1);
     // Execução dos comandos
     if (number_of_commands == 1) {
 
