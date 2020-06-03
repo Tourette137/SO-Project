@@ -13,7 +13,6 @@
 
 //TODO:
 //      - Server passar informação ao client, em vez de mandar para o stdout;
-//      - Usar o max_execution_time e max_inactivity_time (bota SIGALRM nisto); ESTÁ FEITO, MAS VERIFICAR
 //      - Apanhar a puta;
 
 int server_pid;
