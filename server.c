@@ -414,8 +414,6 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        signal(SIGALRM, SIGALRM_handler_server_child_command);
-                        kill(getpid(), SIGALRM);
                         // codigo do filho n-1
                         //close(p[i-1][1]); //Já está fechado do anterior
                         dup2(p[i-1][0],0);
