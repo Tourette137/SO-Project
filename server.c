@@ -173,7 +173,9 @@ void read_client_command(char* command)
 
         for (int i = 0; i < total_tasks_running; i++) {
             if (tasks_running[i]->id == n) {
-                kill(tasks_running[i]->pid, SIGKILL);
+                pid_t child_pid = tasks_running[i]->pid;
+                kill(child_pid, SIGKILL);
+                waitpid(child_pid, NULL, 0);
                 end_task_given(n-1, i, TASK_TERMINATED_INTERRUPTED);
                 break;
             }
