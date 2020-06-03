@@ -2,6 +2,7 @@
 #define MAX_COMMANDS 10
 
 #define PIPENAME "server_pipe"
+#define ERROR_FILENAME "error.txt"
 
 // TASK STATUS MACROS
 #define TASK_RUNNING 0

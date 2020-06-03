@@ -16,6 +16,7 @@
 //      - Apanhar a puta;
 
 int server_pid;
+int default_fd_error;
 int max_inactivity_time = -1;
 int current_inactivity_time = 0;
 int max_execution_time = -1;
@@ -97,14 +98,40 @@ void SIGALRM_handler_server_child_command(int signum)
     alarm(1);
 }
 
+void SIGINT_handler(int signum)
+{
+    for (int i = 0; i < total_tasks_history; i++)
+        freeTask(tasks_history[i]);
+    free(tasks_history);
+
+    for (int i = 0; i < total_tasks_running; i++)
+        freeTask(tasks_running[i]);
+    free(tasks_running);
+
+    close(default_fd_error);
+
+    printf("\n\tRunning Errors:\n\n");
+    //exec_command("cat error.txt");
+    execlp("cat", "cat", ERROR_FILENAME, NULL);
+
+    _exit(0);
+}
+
 
 int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler);
+    signal(SIGINT, SIGINT_handler);
 
     char buffer[BUFFER_SIZE];
     int fd_fifo;
     ssize_t bytes_read;
+    default_fd_error = open(ERROR_FILENAME, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    if (default_fd_error == -1) {
+        perror("Open error file");
+        return -1;
+    }
+    dup2(default_fd_error,2);
 
     // Store server PID for later use
     server_pid = getpid();
@@ -134,15 +161,6 @@ int main(int argc, char const** argv)
 
         close(fd_fifo);
     }
-
-    for (int i = 0; i < total_tasks_history; i++) {
-        freeTask(tasks_history[i]);
-    }
-    free(tasks_history);
-
-    for (int i = 0; i < total_tasks_running; i++)
-        freeTask(tasks_running[i]);
-    free(tasks_running);
 
     return 0;
 }

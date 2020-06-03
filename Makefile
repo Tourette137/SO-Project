@@ -24,3 +24,4 @@ clean:
 	rm server
 	rm client
 	rm server_pipe
+	rm error.txt
