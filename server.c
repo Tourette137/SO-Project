@@ -110,7 +110,7 @@ void SIGINT_handler(int signum)
 
     close(default_fd_error);
 
-    printf("\n\tRunning Errors:\n\n");
+    printf("\n\n\n\tRunning Errors:\n\n");
     //exec_command("cat error.txt");
     execlp("cat", "cat", ERROR_FILENAME, NULL);
 
@@ -407,7 +407,6 @@ int execute_Chained_Commands (char* commands, int id)
                         return -1;
                     case 0:
                         signal(SIGALRM, SIGALRM_handler_server_child_command);
-                        kill(getpid(), SIGALRM);
 
                         // codigo do filho 0
                         close(p[i][0]);
@@ -415,8 +414,18 @@ int execute_Chained_Commands (char* commands, int id)
                         dup2(p[i][1],1);
                         close(p[i][1]);
 
-                        exec_command(commands_array[i]);
-                        _exit(0);
+                        switch (fork()) {
+                            case -1:
+                                perror("Fork");
+                                return -1;
+                            case 0:
+                                exec_command(commands_array[i]);
+                            default:
+                                kill(getpid(), SIGALRM);
+                        }
+
+                        wait(NULL);
+                        _exit(EXIT_STATUS_TERMINATED);
                     default:
                         close(p[i][1]);
 
@@ -440,7 +449,6 @@ int execute_Chained_Commands (char* commands, int id)
                         close(p[i-1][0]);
 
                         exec_command(commands_array[i]);
-                        _exit(0);
                     default:
                         close(p[i-1][0]);
 
@@ -459,7 +467,7 @@ int execute_Chained_Commands (char* commands, int id)
                         return -1;
                     case 0:
                         signal(SIGALRM, SIGALRM_handler_server_child_command);
-                        kill(getpid(), SIGALRM);
+
                         // codigo do filho i
                         //close(p[i-1][1]); //Fechado no anterior
                         close(p[i][0]);
@@ -470,8 +478,18 @@ int execute_Chained_Commands (char* commands, int id)
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
-                        exec_command(commands_array[i]);
-                        _exit(0);
+                        switch (fork()) {
+                            case -1:
+                                perror("Fork");
+                                return -1;
+                            case 0:
+                                exec_command(commands_array[i]);
+                            default:
+                                kill(getpid(), SIGALRM);
+                        }
+
+                        wait(NULL);
+                        _exit(EXIT_STATUS_TERMINATED);
                     default:
                         close(p[i][1]);
                         close(p[i-1][0]);
