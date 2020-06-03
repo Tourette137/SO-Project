@@ -17,9 +17,9 @@
 //      - Apanhar a puta;
 
 int server_pid;
-int max_inactivity_time = 10;
+int max_inactivity_time = -1;
 int current_inactivity_time = 0;
-int max_execution_time = 10;
+int max_execution_time = -1;
 int current_execution_time = 0;
 TASK* tasks_history = NULL;
 int total_tasks_history = 0;
@@ -51,15 +51,15 @@ void SIGUSR1_handler(int signum)
                 switch (WEXITSTATUS(status)) {
                     case EXIT_STATUS_TERMINATED:
                         end_task_given(task_id-1, i, TASK_TERMINATED);
-                        printf("[DEBUG] job done with exit code TASK_TERMINATED\n");
+                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED\n", task_id);
                         break;
                     case EXIT_STATUS_INACTIVITY:
                         end_task_given(task_id-1, i, TASK_TERMINATED_INACTIVITY);
-                        printf("[DEBUG] job done with exit code TASK_TERMINATED_INACTIVITY\n");
+                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_INACTIVITY\n", task_id);
                         break;
                     case EXIT_STATUS_EXECUTION_TIME:
                         end_task_given(task_id-1, i, TASK_TERMINATED_EXECUTION_TIME);
-                        printf("[DEBUG] job done with exit code TASK_TERMINATED_EXECUTION_TIME\n");
+                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_EXECUTION_TIME\n", task_id);
                         break;
                 }
             }
@@ -76,7 +76,7 @@ void SIGUSR1_handler(int signum)
 void SIGALRM_handler_server_child(int signum)
 {
     current_execution_time++;
-    if (current_execution_time >= max_execution_time) {
+    if (current_execution_time > max_execution_time && max_execution_time >= 0) {
         kill(getppid(), SIGUSR1);
         _exit(EXIT_STATUS_EXECUTION_TIME);
     }
@@ -91,7 +91,7 @@ void SIGALRM_handler_server_child(int signum)
 void SIGALRM_handler_server_child_command(int signum)
 {
     current_inactivity_time++;
-    if (current_inactivity_time >= max_inactivity_time) {
+    if (current_inactivity_time > max_inactivity_time && max_inactivity_time >= 0) {
         _exit(EXIT_STATUS_INACTIVITY);
     }
 
@@ -357,7 +357,7 @@ int execute_Chained_Commands (char* commands, int id)
         line = strtok (NULL, "|");
     }
 
-    alarm(1);
+    kill(getpid(), SIGALRM);
     // Execução dos comandos
     if (number_of_commands == 1) {
 
@@ -387,8 +387,8 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        //signal(SIGALRM, SIGALRM_handler_server_child_command);
-                        alarm(1);
+                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        kill(getpid(), SIGALRM);
 
                         // codigo do filho 0
                         close(p[i][0]);
@@ -415,8 +415,8 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        //signal(SIGALRM, SIGALRM_handler_server_child_command);
-                        alarm(1);
+                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        kill(getpid(), SIGALRM);
                         // codigo do filho n-1
                         //close(p[i-1][1]); //Já está fechado do anterior
                         dup2(p[i-1][0],0);
@@ -441,8 +441,8 @@ int execute_Chained_Commands (char* commands, int id)
                         perror("Fork");
                         return -1;
                     case 0:
-                        //signal(SIGALRM, SIGALRM_handler_server_child_command);
-                        alarm(1);
+                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        kill(getpid(), SIGALRM);
                         // codigo do filho i
                         //close(p[i-1][1]); //Fechado no anterior
                         close(p[i][0]);
