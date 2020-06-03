@@ -63,7 +63,7 @@ void SIGUSR1_handler(int signum)
                         break;
                 }
             }
-
+            break;
         }
     }
 }
@@ -336,15 +336,13 @@ void end_task_given (int task_ind, int task_running_ind, int terminated_status)
  */
 int exec_command (char* command)
 {
-    char** exec_args = malloc(sizeof(char*)); //Aqui usamos assim para comandos terem a extensão que bem entenderem
+    int number_of_args = strcnt(command, ' ') + 1;
+    char* exec_args[number_of_args];
     char* string;
-    int exec_ret=0, i=0;
+    int exec_ret = 0, i = 0;
 
     string = strtok(command, " ");
     while (string != NULL) {
-        if (realloc(exec_args, (i+1)*(sizeof(char*))) == NULL) { //Necessidade de fazer um realloc para aumentar o numero de argumentos de um mesmo comando
-            perror("Realloc não executado");
-        }
         exec_args[i] = string;
         string = strtok(NULL, " ");
         i++;
@@ -365,15 +363,14 @@ int execute_Chained_Commands (char* commands, int id)
 {
     char* line;
     int number_of_commands = strcnt(commands, '|') + 1;
-    char* commands_array[number_of_commands];
     int p[number_of_commands-1][2];
+    char* commands_array[number_of_commands];
     int status [number_of_commands];
 
     // Parsing da string com os comandos para um array com os comandos
-    line = strtok(commands, "|");
     for(int i = 0; i < number_of_commands; i++) {
+        line = strsep(&commands,"|");
         commands_array[i] = strdup(line);
-        line = strtok (NULL, "|");
     }
 
     kill(getpid(), SIGALRM);
