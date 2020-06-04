@@ -15,8 +15,10 @@
 //      - Server passar informação ao client, em vez de mandar para o stdout;
 //      - Apanhar a puta;
 
-int server_pid;
+pid_t server_pid;
 int default_fd_error;
+pid_t child_pid;
+
 int max_inactivity_time = -1;
 int current_inactivity_time = 0;
 int max_execution_time = -1;
@@ -61,6 +63,10 @@ void SIGUSR1_handler(int signum)
                         end_task_given(task_id-1, i, TASK_TERMINATED_EXECUTION_TIME);
                         printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_EXECUTION_TIME\n", task_id);
                         break;
+                    case EXIT_STATUS_TERMINATED_INTERRUPTED:
+                        end_task_given(task_id-1, i, TASK_TERMINATED_INTERRUPTED);
+                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_INTERRUPTED\n", task_id);
+                        break;
                 }
             }
             break;
@@ -98,7 +104,7 @@ void SIGALRM_handler_server_child_command(int signum)
     alarm(1);
 }
 
-void SIGINT_handler(int signum)
+void SIGINT_handler_server(int signum)
 {
     for (int i = 0; i < total_tasks_history; i++)
         freeTask(tasks_history[i]);
@@ -117,11 +123,25 @@ void SIGINT_handler(int signum)
     _exit(0);
 }
 
+void SIGINT_handler_server_child(int signum)
+{
+    kill(child_pid, SIGINT);
+    wait(NULL);
+    kill(getppid(), SIGUSR1);
+    _exit(EXIT_STATUS_TERMINATED_INTERRUPTED);
+}
+
+void SIGINT_handler_server_child_command(int signum)
+{
+    kill(child_pid, SIGKILL);
+    _exit(0);
+}
+
 
 int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler);
-    signal(SIGINT, SIGINT_handler);
+    signal(SIGINT, SIGINT_handler_server);
 
     char buffer[BUFFER_SIZE];
     int fd_fifo;
@@ -192,9 +212,7 @@ void read_client_command(char* command)
         for (int i = 0; i < total_tasks_running; i++) {
             if (tasks_running[i]->id == n) {
                 pid_t child_pid = tasks_running[i]->pid;
-                kill(child_pid, SIGKILL);
-                waitpid(child_pid, NULL, 0);
-                end_task_given(n-1, i, TASK_TERMINATED_INTERRUPTED);
+                kill(child_pid, SIGINT);
                 break;
             }
         }
@@ -222,6 +240,7 @@ void launch_task_on_server(char* command)
             return;
         case 0:
             signal(SIGALRM, SIGALRM_handler_server_child);
+            signal(SIGINT, SIGINT_handler_server_child);
             if (execute_Chained_Commands(command, task_id) == -1)
                 perror("Execute task");
             kill(getppid(), SIGUSR1);
@@ -377,7 +396,9 @@ int execute_Chained_Commands (char* commands, int id)
     // Execução dos comandos
     if (number_of_commands == 1) {
 
-        switch (fork()) {
+        pid_t fork_pid = fork();
+
+        switch (fork_pid) {
             case -1:
                 perror("Fork");
                 return -1;
@@ -385,6 +406,7 @@ int execute_Chained_Commands (char* commands, int id)
                 exec_command(commands_array[0]);
                 _exit(0);
             default:
+                child_pid = fork_pid;
                 wait(&status[0]);
         }
     }
@@ -398,7 +420,9 @@ int execute_Chained_Commands (char* commands, int id)
                     return -1;
                 }
 
-                switch(fork()) {
+                pid_t fork_pid = fork();
+
+                switch(fork_pid) {
                     case -1:
                         perror("Fork");
                         return -1;
@@ -411,26 +435,32 @@ int execute_Chained_Commands (char* commands, int id)
                         dup2(p[i][1],1);
                         close(p[i][1]);
 
-                        switch (fork()) {
+                        fork_pid = fork();
+
+                        switch (fork_pid) {
                             case -1:
                                 perror("Fork");
                                 return -1;
                             case 0:
                                 exec_command(commands_array[i]);
                             default:
+                                child_pid = fork_pid;
                                 kill(getpid(), SIGALRM);
                         }
 
                         wait(NULL);
                         _exit(EXIT_STATUS_TERMINATED);
                     default:
+                        child_pid = fork_pid;
                         close(p[i][1]);
 
                 }
             }
             else if (i == number_of_commands-1) {
 
-                switch(fork()) {
+                pid_t fork_pid = fork();
+
+                switch(fork_pid) {
                     case -1:
                         perror("Fork");
                         return -1;
@@ -442,6 +472,7 @@ int execute_Chained_Commands (char* commands, int id)
 
                         exec_command(commands_array[i]);
                     default:
+                        child_pid = fork_pid;
                         close(p[i-1][0]);
 
                 }
@@ -453,7 +484,9 @@ int execute_Chained_Commands (char* commands, int id)
                     return -1;
                 }
 
-                switch(fork()) {
+                pid_t fork_pid = fork();
+
+                switch(fork_pid) {
                     case -1:
                         perror("Fork");
                         return -1;
@@ -470,19 +503,23 @@ int execute_Chained_Commands (char* commands, int id)
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
-                        switch (fork()) {
+                        fork_pid = fork();
+
+                        switch (fork_pid) {
                             case -1:
                                 perror("Fork");
                                 return -1;
                             case 0:
                                 exec_command(commands_array[i]);
                             default:
+                                child_pid = fork_pid;
                                 kill(getpid(), SIGALRM);
                         }
 
                         wait(NULL);
                         _exit(EXIT_STATUS_TERMINATED);
                     default:
+                        child_pid = fork_pid;
                         close(p[i][1]);
                         close(p[i-1][0]);
 
