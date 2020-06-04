@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -g
 OBJDIR = obj
-OBJS = $(OBJDIR)/auxs.o $(OBJDIR)/task.o
+OBJS = $(OBJDIR)/auxs.o $(OBJDIR)/task.o $(OBJDIR)/server_child.o
 SERVER_OBJS = $(OBJDIR)/server.o
 CLIENT_OBJS = $(OBJDIR)/client.o
 DEPS = macros.h
