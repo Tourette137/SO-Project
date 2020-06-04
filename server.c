@@ -363,8 +363,8 @@ int execute_Chained_Commands (char* commands, int id)
 {
     char* line;
     int number_of_commands = strcnt(commands, '|') + 1;
-    int p[number_of_commands-1][2];
     char* commands_array[number_of_commands];
+    int p[number_of_commands-1][2];
     int status [number_of_commands];
 
     // Parsing da string com os comandos para um array com os comandos
@@ -429,11 +429,6 @@ int execute_Chained_Commands (char* commands, int id)
                 }
             }
             else if (i == number_of_commands-1) {
-
-                if (pipe(p[i]) != 0) {
-                    perror("Pipe");
-                    return -1;
-                }
 
                 switch(fork()) {
                     case -1:
