@@ -7,10 +7,10 @@
 #include <sys/stat.h>
 #include <signal.h>
 
-#include "macros.h"
-#include "auxs.h"
-#include "task.h"
-#include "server_child.h"
+#include "../includes/macros.h"
+#include "../includes/auxs.h"
+#include "../includes/task.h"
+#include "../includes/server_child.h"
 
 //TODO:
 //      - Server passar informação ao client, em vez de mandar para o stdout;

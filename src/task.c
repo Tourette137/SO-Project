@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "macros.h"
-#include "task.h"
+#include "../includes/macros.h"
+#include "../includes/task.h"
 
 TASK initTask(int id, pid_t pid, char* command, int status)
 {

@@ -1,10 +1,11 @@
 CC = gcc
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -I$(INCDIR)
 OBJDIR = obj
+SRCDIR = src
+INCDIR = includes
 OBJS = $(OBJDIR)/auxs.o $(OBJDIR)/task.o $(OBJDIR)/server_child.o
 SERVER_OBJS = $(OBJDIR)/server.o
 CLIENT_OBJS = $(OBJDIR)/client.o
-DEPS = macros.h
 
 all:
 	make server
@@ -16,7 +17,7 @@ server: $(SERVER_OBJS) $(OBJS)
 client: $(CLIENT_OBJS) $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
-$(OBJDIR)/%.o: %.c $(DEPS)
+$(OBJDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:

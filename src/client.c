@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#include "macros.h"
-#include "auxs.h"
+#include "../includes/macros.h"
+#include "../includes/auxs.h"
 
 void simplify_command(char* command, ssize_t size);
 

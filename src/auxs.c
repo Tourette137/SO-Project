@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "auxs.h"
+#include "../includes/auxs.h"
 
 /**
  * @brief           Função que lê uma linha do file descriptor 'fd'
