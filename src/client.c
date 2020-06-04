@@ -9,17 +9,18 @@
 #include "../includes/macros.h"
 #include "../includes/auxs.h"
 
-void simplify_command(char* command, ssize_t size);
-
+void simplify_command(char*, ssize_t);
+void read_task_output_from_server();
 
 int main(int argc, char const** argv)
 {
-    int fd_fifo;
+    int fd_fifo_client_server;
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read = 1;
 
-    if ((fd_fifo = open(PIPENAME, O_WRONLY)) == -1)
-        perror("Open");
+    // Open pipe for client->server communication
+    if ((fd_fifo_client_server = open(CLIENT_SERVER_PIPENAME, O_WRONLY)) == -1)
+        perror("Open client->server pipe");
     else
         printf("[DEBUG] opened FIFO for writing\n");
 
@@ -30,8 +31,10 @@ int main(int argc, char const** argv)
             strcat(buffer, argv[i]);
         }
 
-        write(fd_fifo, buffer, strlen(buffer));
+        write(fd_fifo_client_server, buffer, strlen(buffer));
         printf("[DEBUG] wrote '%s' to fifo\n", buffer);
+
+        read_task_output_from_server();
     }
     else {
 
@@ -39,15 +42,41 @@ int main(int argc, char const** argv)
         while ((bytes_read = readln(0, buffer, BUFFER_SIZE)) > 0 && strcmp(buffer, "exit") != 0) {
             simplify_command(buffer, bytes_read);
 
-            write(fd_fifo, buffer, bytes_read);
+            write(fd_fifo_client_server, buffer, bytes_read);
             printf("[DEBUG] wrote '%s' to fifo\n", buffer);
+
+            read_task_output_from_server();
+
             write(1, "    $ ", 6);
         }
     }
 
-    close(fd_fifo);
+    close(fd_fifo_client_server);
 
     return 0;
+}
+
+void read_task_output_from_server()
+{
+    ssize_t bytes_read;
+    char buffer[BUFFER_SIZE];
+    int fd_fifo_server_client;
+
+    // Open pipe for server->client communication
+    if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_RDONLY)) == -1)
+        perror("Open server->client pipe");
+    else
+        printf("[DEBUG] opened FIFO for reading\n");
+
+    while ((bytes_read = read(fd_fifo_server_client, buffer, BUFFER_SIZE)) > 0) {
+        //printf("[DEBUG] received '%s' from server\n", buffer);
+
+        write(1, buffer, bytes_read);
+
+        bzero(buffer, BUFFER_SIZE);
+    }
+
+    close(fd_fifo_server_client);
 }
 
 /**

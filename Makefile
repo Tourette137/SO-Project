@@ -24,5 +24,6 @@ clean:
 	rm -f $(OBJDIR)/*.o
 	rm server
 	rm client
-	rm server_pipe
+	rm server_client_pipe
+	rm client_server_pipe
 	rm error.txt

@@ -1,7 +1,9 @@
 #define BUFFER_SIZE 1024
 
-#define PIPENAME "server_pipe"
+#define CLIENT_SERVER_PIPENAME "client_server_pipe"
+#define SERVER_CLIENT_PIPENAME "server_client_pipe"
 #define ERROR_FILENAME "error.txt"
+#define RESULT_OUTPUT_FILENAME "result_output_"
 
 // TASK STATUS MACROS
 #define TASK_RUNNING 0

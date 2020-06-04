@@ -17,6 +17,8 @@
 //      - Apanhar a puta;
 
 int default_fd_error;
+int fd_fifo_client_server;
+int fd_fifo_server_client;
 
 int max_inactivity_time = -1;
 int max_execution_time = -1;
@@ -25,6 +27,8 @@ int total_tasks_history = 0;
 TASK* tasks_running = NULL;
 int total_tasks_running = 0;
 
+void write_task_output_to_client(int);
+int remove_file(char*);
 void launch_task_on_server(char*);
 void read_client_command(char*);
 void print_server_running_tasks();
@@ -65,6 +69,7 @@ void SIGUSR1_handler(int signum)
                         break;
                 }
             }
+            write_task_output_to_client(task_id);
             break;
         }
     }
@@ -97,8 +102,9 @@ int main(int argc, char const** argv)
     signal(SIGINT, SIGINT_handler_server);
 
     char buffer[BUFFER_SIZE];
-    int fd_fifo;
     ssize_t bytes_read;
+
+    // Open file for replacing stderror
     default_fd_error = open(ERROR_FILENAME, O_CREAT | O_WRONLY | O_TRUNC, 0600);
     if (default_fd_error == -1) {
         perror("Open error file");
@@ -106,33 +112,140 @@ int main(int argc, char const** argv)
     }
     dup2(default_fd_error,2);
 
-    // Create pipe for communicating with the clients
-    if (mkfifo(PIPENAME, 0666) == -1)
-        perror("Mkfifo");
+    // Create pipe for client->server communication
+    if (mkfifo(CLIENT_SERVER_PIPENAME, 0666) == -1)
+        perror("Mkfifo client->server");
+
+    // Create pipe for server->client communication
+    if (mkfifo(SERVER_CLIENT_PIPENAME, 0666) == -1)
+        perror("Mkfifo server->client");
+
 
     // Run cicle, waiting for input from the client
     while (1) {
 
         bzero(buffer, BUFFER_SIZE);
 
-        if ((fd_fifo = open(PIPENAME, O_RDONLY)) == -1) {
-            perror("Open FIFO");
+        if ((fd_fifo_client_server = open(CLIENT_SERVER_PIPENAME, O_RDONLY)) == -1) {
+            perror("Open client->server pipe");
             return -1;
         }
         else {
             printf("[DEBUG] opened FIFO for reading\n");
         }
 
-        while ((bytes_read = read(fd_fifo, buffer, BUFFER_SIZE)) > 0) {
+        while ((bytes_read = read(fd_fifo_client_server, buffer, BUFFER_SIZE)) > 0) {
             printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
         }
 
-        close(fd_fifo);
+        close(fd_fifo_client_server);
     }
 
     return 0;
+}
+
+void write_task_output_to_client(int task_id)
+{
+    char result_output_filename[BUFFER_SIZE];
+    sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+    int fd_result_output = open(result_output_filename, O_RDONLY);
+
+    // Open pipe for server->client communication
+    if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_WRONLY)) == -1)
+        perror("Open server->client pipe");
+    else
+        printf("[DEBUG] opened FIFO for writing\n");
+
+    ssize_t bytes_read;
+    char buffer[BUFFER_SIZE];
+
+    while ((bytes_read = read(fd_result_output, buffer, BUFFER_SIZE)) > 0) {
+        write(fd_fifo_server_client, buffer, bytes_read);
+    }
+
+    close(fd_result_output);
+    close(fd_fifo_server_client);
+
+    if (remove_file(result_output_filename) == -1)
+        perror("Remove output file");
+}
+
+int remove_file(char* filename)
+{
+    int status;
+
+    switch (fork()) {
+        case -1:
+            perror("Fork");
+            return -1;
+        case 0:
+            execlp("rm", "rm", filename, NULL);
+        default:
+            wait(&status);
+    }
+
+    return status;
+}
+
+void write_output_to_client(char* command)
+{
+    char buffer[BUFFER_SIZE];
+    int written_bytes;
+
+    // Open pipe for server->client communication
+    if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_WRONLY)) == -1)
+        perror("Open server->client pipe");
+    else
+        printf("[DEBUG] opened FIFO for writing\n");
+
+    if (strncmp(command,"-l",2) == 0) {
+        for(int i = 0; i < total_tasks_history; i++) {
+            TASK aux_task = tasks_history[i];
+            if (aux_task->status == TASK_RUNNING) {
+                bzero(buffer, BUFFER_SIZE);
+                written_bytes = sprintf(buffer, "#%d: %s\n", i+1, aux_task->command);
+                write(fd_fifo_server_client, buffer, written_bytes);
+            }
+        }
+    }
+    else if (strncmp(command,"-r",2) == 0) {
+        for(int i = 0; i < total_tasks_history; i++) {
+            TASK aux_task = tasks_history[i];
+            if (aux_task->status != TASK_RUNNING) {
+                bzero(buffer, BUFFER_SIZE);
+                written_bytes = sprintf(buffer, "#%d, ", i+1);
+
+                int aux_status = aux_task->status;
+                if (aux_status == TASK_TERMINATED) written_bytes += sprintf(buffer+written_bytes, "concluida: ");
+                else if (aux_status == TASK_TERMINATED_INACTIVITY) written_bytes += sprintf(buffer+written_bytes, "max inactividade: ");
+                else if (aux_status == TASK_TERMINATED_EXECUTION_TIME) written_bytes += sprintf(buffer+written_bytes, "max execução: ");
+                else if (aux_status == TASK_TERMINATED_INTERRUPTED) written_bytes += sprintf(buffer+written_bytes, "interrompida: ");
+
+                written_bytes += sprintf(buffer+written_bytes, "%s\n", aux_task->command);
+
+                write(fd_fifo_server_client, buffer, written_bytes);
+            }
+        }
+    }
+    else if (strncmp(command,"-h",2) == 0) {
+        bzero(buffer, BUFFER_SIZE);
+        written_bytes = 0;
+        written_bytes += sprintf(buffer+written_bytes, "tempo-inactividade segs\n");
+        written_bytes += sprintf(buffer+written_bytes, "tempo-execucao segs\n");
+        written_bytes += sprintf(buffer+written_bytes, "executar p1 | p2 ... | pn\n");
+        written_bytes += sprintf(buffer+written_bytes, "listar\n");
+        written_bytes += sprintf(buffer+written_bytes, "terminar #tarefa\n");
+        written_bytes += sprintf(buffer+written_bytes, "historico\n");
+
+        write(fd_fifo_server_client, buffer, written_bytes);
+    }
+    else {
+        write(fd_fifo_server_client, " ", 1);
+    }
+
+    close(fd_fifo_server_client);
 }
 
 /**
@@ -144,17 +257,19 @@ void read_client_command(char* command)
     if (strncmp(command, "-i", 2) == 0) {
         int n = atoi(command+3);
         changeMaxInactivityTime(n);
+        write_output_to_client(command);
     }
     else if (strncmp(command, "-m", 2) == 0) {
         int n = atoi(command+3);
         changeMaxExecutionTime(n);
+        write_output_to_client(command);
     }
     else if (strncmp(command, "-e", 2) == 0) {
         add_task_to_server(command+3);
         launch_task_on_server(command+3);
     }
     else if (strncmp(command, "-l", 2) == 0) {
-        print_server_running_tasks();
+        write_output_to_client(command);
     }
     else if (strncmp(command, "-t", 2) == 0) {
         int n = atoi(command+3);
@@ -166,13 +281,13 @@ void read_client_command(char* command)
                 break;
             }
         }
-
+        write_output_to_client(command);
     }
     else if (strncmp(command, "-r", 2) == 0) {
-        print_server_terminated_tasks();
+        write_output_to_client(command);
     }
     else if (strncmp(command, "-h", 2) == 0) {
-        print_help_menu();
+        write_output_to_client(command);
     }
     else {
         printf("Received invalid input from client\n");
@@ -193,55 +308,6 @@ void launch_task_on_server(char* command)
         default:
             tasks_running[total_tasks_running-1]->pid = pid;
     }
-}
-
-
-/**
- * @brief       Função que imprime as tarefas que estão a correr no servidor
- */
-void print_server_running_tasks()
-{
-    for(int i = 0; i < total_tasks_history; i++) {
-        TASK aux_task = tasks_history[i];
-        if (aux_task->status == TASK_RUNNING) {
-            printf("#%d: ", i+1);
-            printf("%s\n", aux_task->command);
-        }
-    }
-}
-
-/**
- * @brief       Função que imprime as tarefas que já terminaram de correr no servidor
- */
-void print_server_terminated_tasks()
-{
-    for(int i = 0; i < total_tasks_history; i++) {
-        TASK aux_task = tasks_history[i];
-        if (aux_task->status != TASK_RUNNING) {
-            printf("#%d, ", i+1);
-
-            int aux_status = aux_task->status;
-            if (aux_status == TASK_TERMINATED) printf("concluida: ");
-            else if (aux_status == TASK_TERMINATED_INACTIVITY) printf("max inactividade: ");
-            else if (aux_status == TASK_TERMINATED_EXECUTION_TIME) printf("max execução: ");
-            else if (aux_status == TASK_TERMINATED_INTERRUPTED) printf("interrompida: ");
-
-            printf("%s\n", aux_task->command);
-        }
-    }
-}
-
-/**
- * @brief       Função que imprime o menu de ajuda para o utilizador
- */
-void print_help_menu()
-{
-    printf("tempo-inactividade segs\n");
-    printf("tempo-execucao segs\n");
-    printf("executar p1 | p2 ... | pn\n");
-    printf("listar\n");
-    printf("terminar #tarefa\n");
-    printf("historico\n");
 }
 
 /**
