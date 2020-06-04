@@ -7,11 +7,12 @@
 #include <sys/stat.h>
 #include <signal.h>
 
-#include "macros.h"
-#include "auxs.h"
-#include "task.h"
+#include "../includes/macros.h"
+#include "../includes/auxs.h"
+#include "../includes/task.h"
 
 pid_t child_pid;
+int fd_result_output;
 
 int max_inactivity_time;
 int current_inactivity_time = 0;
@@ -70,6 +71,15 @@ void server_child_start(int task_id, char* command)
 {
     signal(SIGALRM, SIGALRM_handler_server_child);
     signal(SIGINT, SIGINT_handler_server_child);
+
+    char result_output_filename[BUFFER_SIZE];
+    sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+
+    fd_result_output = open(result_output_filename, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    if (fd_result_output == -1) {
+        perror("Open error file");
+        fd_result_output = 1;
+    }
 
     if (execute_Chained_Commands(command, task_id) == -1)
         perror("Execute task");
@@ -134,6 +144,7 @@ int execute_Chained_Commands (char* commands, int id)
                 perror("Fork");
                 return -1;
             case 0:
+                dup2(fd_result_output, 1);
                 exec_command(commands_array[0]);
                 _exit(0);
             default:
@@ -200,6 +211,8 @@ int execute_Chained_Commands (char* commands, int id)
                         //close(p[i-1][1]); //Já está fechado do anterior
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
+
+                        dup2(fd_result_output, 1);
 
                         exec_command(commands_array[i]);
                     default:
