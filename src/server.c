@@ -27,6 +27,8 @@ int total_tasks_history = 0;
 TASK* tasks_running = NULL;
 int total_tasks_running = 0;
 
+void write_task_output_from_log_file_to_client(int);
+void write_task_output_to_log_file(int);
 void write_task_output_to_client(int);
 int remove_file(char*);
 void launch_task_on_server(char*);
@@ -55,6 +57,7 @@ void SIGUSR1_handler(int signum)
                         end_task_given(task_id-1, i, TASK_TERMINATED);
                         printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED\n", task_id);
                         write_task_output_to_client(task_id);
+                        write_task_output_to_log_file(task_id);
                         break;
                     case EXIT_STATUS_INACTIVITY:
                         end_task_given(task_id-1, i, TASK_TERMINATED_INACTIVITY);
@@ -70,6 +73,13 @@ void SIGUSR1_handler(int signum)
                         break;
                 }
             }
+
+            // Remove temporary output file created
+            char result_output_filename[BUFFER_SIZE];
+            sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+            if (remove_file(result_output_filename) == -1)
+                perror("Remove output file");
+
             break;
         }
     }
@@ -88,6 +98,8 @@ void SIGINT_handler_server(int signum)
     free(tasks_running);
 
     close(default_fd_error);
+    close(fd_fifo_client_server);
+    close(fd_fifo_server_client);
 
     printf("\n\n\n\tRunning Errors:\n\n");
     execlp("cat", "cat", ERROR_FILENAME, NULL);
@@ -120,6 +132,13 @@ int main(int argc, char const** argv)
     if (mkfifo(SERVER_CLIENT_PIPENAME, 0666) == -1)
         perror("Mkfifo server->client");
 
+    // Remove previously created log file
+    if (remove_file(LOG_FILENAME) == -1)
+        perror("Remove log file");
+
+    // Remove previously created log index file
+    if (remove_file(LOG_INDEX_FILENAME) == -1)
+        perror("Remove log index file");
 
     // Run cicle, waiting for input from the client
     while (1) {
@@ -160,6 +179,102 @@ int main(int argc, char const** argv)
     return 0;
 }
 
+void write_task_output_from_log_file_to_client(int task_id)
+{
+    // Open log file
+    int fd_log_file = open(LOG_FILENAME, O_RDONLY);
+
+    // Open log index file
+    int fd_log_index_file = open(LOG_INDEX_FILENAME, O_RDONLY);
+
+    off_t start_pos;
+    int total_bytes = -1;
+
+    // Reading log index file to find task output position in log file
+    char buffer[BUFFER_SIZE];
+    char* aux_string;
+    int aux_task_id;
+
+    while (1) {
+        bzero(buffer, BUFFER_SIZE);
+        readln(fd_log_index_file, buffer, BUFFER_SIZE);
+        aux_string = strtok(buffer, ":");
+        aux_task_id = atoi(aux_string);
+        if (aux_task_id == task_id) {
+            aux_string = strtok(NULL, ":");
+            start_pos = atoi(aux_string);
+            aux_string = strtok(NULL, ":");
+            total_bytes = atoi(aux_string);
+            break;
+        }
+    }
+
+    // Set log file offset to task output start
+    lseek(fd_log_file, start_pos, SEEK_SET);
+
+    // Reading log file and writing to client
+    kill(client_pid, SIGUSR1);
+
+    ssize_t bytes_read, total_bytes_read = 0;
+
+    sprintf(buffer, "TASK #%d RESULT\n", task_id);
+    write(fd_fifo_server_client, buffer, strlen(buffer));
+
+    while (total_bytes_read < total_bytes) {
+        bzero(buffer, BUFFER_SIZE);
+        bytes_read = read(fd_log_file, buffer, BUFFER_SIZE);
+        total_bytes_read += bytes_read;
+
+        if (total_bytes_read > total_bytes) {
+            bytes_read = bytes_read - (total_bytes_read - total_bytes);
+        }
+        write(fd_fifo_server_client, buffer, bytes_read);
+    }
+
+    write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
+
+    // Close file descriptors
+    close(fd_log_file);
+    close(fd_log_index_file);
+}
+
+void write_task_output_to_log_file(int task_id)
+{
+    // Open task output temporary file
+    char result_output_filename[BUFFER_SIZE];
+    sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+    int fd_result_output = open(result_output_filename, O_RDONLY);
+
+    // Open log file
+    int fd_log_file = open(LOG_FILENAME, O_CREAT | O_WRONLY | O_APPEND, 0600);
+
+    // Open log index file
+    int fd_log_index_file = open(LOG_INDEX_FILENAME, O_CREAT | O_WRONLY | O_APPEND, 0600);
+
+    // Set variable to write on file index file
+    off_t start_pos = lseek(fd_log_file, 0, SEEK_END);
+    int total_bytes = 0;
+
+    // Reading from task output file and writing to log file
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_read;
+
+    // Updating log file
+    while ((bytes_read = read(fd_result_output, buffer, BUFFER_SIZE)) > 0) {
+        write(fd_log_file, buffer, bytes_read);
+        total_bytes += bytes_read;
+    }
+
+    // Updating log index file
+    bytes_read = sprintf(buffer, "%d:%ld:%d\n", task_id, start_pos, total_bytes);
+    write(fd_log_index_file, buffer, bytes_read);
+
+    // Close file descriptors
+    close(fd_result_output);
+    close(fd_log_file);
+    close(fd_log_index_file);
+}
+
 void write_task_output_to_client(int task_id)
 {
     char result_output_filename[BUFFER_SIZE];
@@ -181,9 +296,6 @@ void write_task_output_to_client(int task_id)
     write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
 
     close(fd_result_output);
-
-    if (remove_file(result_output_filename) == -1)
-        perror("Remove output file");
 }
 
 int remove_file(char* filename)
@@ -292,11 +404,6 @@ void read_client_command(char* command)
             }
         }
 
-        char result_output_filename[BUFFER_SIZE];
-        sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
-        if (remove_file(result_output_filename) == -1)
-            perror("Remove output file");
-
         write_output_to_client(command);
     }
     else if (strncmp(command, "-r", 2) == 0) {
@@ -304,6 +411,13 @@ void read_client_command(char* command)
     }
     else if (strncmp(command, "-h", 2) == 0) {
         write_output_to_client(command);
+    }
+    else if (strncmp(command, "-o", 2) == 0) {
+        int task_id = atoi(command+3);
+        if (task_id <= total_tasks_history && tasks_history[task_id-1]->status == EXIT_STATUS_TERMINATED)
+            write_task_output_from_log_file_to_client(task_id);
+        else
+            write_output_to_client(command);
     }
     else {
         printf("Received invalid input from client\n");

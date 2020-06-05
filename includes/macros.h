@@ -4,7 +4,8 @@
 #define SERVER_CLIENT_PIPENAME "server_client_pipe"
 #define ERROR_FILENAME "error.txt"
 #define RESULT_OUTPUT_FILENAME "result_output_"
-#define CLIENT_TASK_RESULT_OUTPUT "tasks_results.txt"
+#define LOG_FILENAME "log.txt"
+#define LOG_INDEX_FILENAME "log.idx"
 
 // TASK STATUS MACROS
 #define TASK_RUNNING 0

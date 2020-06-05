@@ -64,7 +64,8 @@ int main(int argc, char const** argv)
     else {
         execution_mode = 1;
         write(1, "    $ ", 6);
-        while ((bytes_read = readln(0, buffer, BUFFER_SIZE)) > 0 && strcmp(buffer, "exit") != 0) {
+        while (strcmp(buffer, "exit") != 0) {
+            bytes_read = readln(0, buffer, BUFFER_SIZE);
             simplify_command(buffer, bytes_read);
 
             write(fd_fifo_client_server, buffer, bytes_read);
@@ -119,6 +120,7 @@ void simplify_command(char* command, ssize_t size)
     char command_t[] = "terminar ";
     char command_r[] = "historico";
     char command_h[] = "ajuda";
+    char command_o[] = "output ";
 
     if (strncmp(command, command_i, strlen(command_i)) == 0) {
         char* aux = command+strlen(command_i);
@@ -156,5 +158,12 @@ void simplify_command(char* command, ssize_t size)
     }
     else if (strncmp(command, command_h, strlen(command_h)) == 0) {
         strcpy(command, "-h");
+    }
+    else if (strncmp(command, command_o, strlen(command_o)) == 0) {
+        char* aux = command+strlen(command_o);
+        char simplified_command[] = "-o ";
+        strcat(simplified_command, aux);
+
+        strcpy(command, simplified_command);
     }
 }
