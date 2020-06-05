@@ -13,9 +13,9 @@
 #include "../includes/server_child.h"
 
 //TODO:
-//      - Server passar informação ao client, em vez de mandar para o stdout;
 //      - Apanhar a puta;
 
+pid_t client_pid;
 int default_fd_error;
 int fd_fifo_client_server;
 int fd_fifo_server_client;
@@ -54,6 +54,7 @@ void SIGUSR1_handler(int signum)
                     case EXIT_STATUS_TERMINATED:
                         end_task_given(task_id-1, i, TASK_TERMINATED);
                         printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED\n", task_id);
+                        write_task_output_to_client(task_id);
                         break;
                     case EXIT_STATUS_INACTIVITY:
                         end_task_given(task_id-1, i, TASK_TERMINATED_INACTIVITY);
@@ -69,7 +70,6 @@ void SIGUSR1_handler(int signum)
                         break;
                 }
             }
-            write_task_output_to_client(task_id);
             break;
         }
     }
@@ -134,6 +134,10 @@ int main(int argc, char const** argv)
             printf("[DEBUG] opened FIFO for reading\n");
         }
 
+        // Get client PID
+        read(fd_fifo_client_server, buffer, BUFFER_SIZE);
+        client_pid = atoi(buffer);
+
         while ((bytes_read = read(fd_fifo_client_server, buffer, BUFFER_SIZE)) > 0) {
             printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
@@ -152,6 +156,8 @@ void write_task_output_to_client(int task_id)
     sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
     int fd_result_output = open(result_output_filename, O_RDONLY);
 
+    kill(client_pid, SIGUSR1);
+
     // Open pipe for server->client communication
     if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_WRONLY)) == -1)
         perror("Open server->client pipe");
@@ -160,6 +166,9 @@ void write_task_output_to_client(int task_id)
 
     ssize_t bytes_read;
     char buffer[BUFFER_SIZE];
+
+    sprintf(buffer, "TASK #%d RESULT\n", task_id);
+    write(fd_fifo_server_client, buffer, strlen(buffer));
 
     while ((bytes_read = read(fd_result_output, buffer, BUFFER_SIZE)) > 0) {
         write(fd_fifo_server_client, buffer, bytes_read);
@@ -193,6 +202,8 @@ void write_output_to_client(char* command)
 {
     char buffer[BUFFER_SIZE];
     int written_bytes;
+
+    kill(client_pid, SIGUSR1);
 
     // Open pipe for server->client communication
     if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_WRONLY)) == -1)
@@ -291,6 +302,7 @@ void read_client_command(char* command)
     }
     else {
         printf("Received invalid input from client\n");
+        write_output_to_client(command);
     }
 }
 

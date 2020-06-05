@@ -9,11 +9,25 @@
 #include "../includes/macros.h"
 #include "../includes/auxs.h"
 
+int execution_mode;
+
 void simplify_command(char*, ssize_t);
-void read_task_output_from_server();
+void read_output_from_server();
+
+void SIGUSR1_handler_client(int signum)
+{
+    read_output_from_server();
+
+    if (execution_mode == 0)
+        _exit(0);
+    else
+        write(1, "    $ ", 6);
+}
 
 int main(int argc, char const** argv)
 {
+    signal(SIGUSR1, SIGUSR1_handler_client);
+
     int fd_fifo_client_server;
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read = 1;
@@ -24,7 +38,11 @@ int main(int argc, char const** argv)
     else
         printf("[DEBUG] opened FIFO for writing\n");
 
+    sprintf(buffer, "%d", getpid());
+    write(fd_fifo_client_server, buffer, strlen(buffer));
+
     if (argc > 1) {
+        execution_mode = 0;
         strcpy(buffer, argv[1]);
         for (int i = 2; i < argc; i++) {
             strcat(buffer, " ");
@@ -34,10 +52,10 @@ int main(int argc, char const** argv)
         write(fd_fifo_client_server, buffer, strlen(buffer));
         printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
-        read_task_output_from_server();
+        while(1);
     }
     else {
-
+        execution_mode = 1;
         write(1, "    $ ", 6);
         while ((bytes_read = readln(0, buffer, BUFFER_SIZE)) > 0 && strcmp(buffer, "exit") != 0) {
             simplify_command(buffer, bytes_read);
@@ -45,9 +63,8 @@ int main(int argc, char const** argv)
             write(fd_fifo_client_server, buffer, bytes_read);
             printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
-            read_task_output_from_server();
-
-            write(1, "    $ ", 6);
+            if (strncmp(buffer,"-e",2) == 0)
+                write(1, "    $ ", 6);
         }
     }
 
@@ -56,7 +73,7 @@ int main(int argc, char const** argv)
     return 0;
 }
 
-void read_task_output_from_server()
+void read_output_from_server()
 {
     ssize_t bytes_read;
     char buffer[BUFFER_SIZE];
@@ -68,16 +85,17 @@ void read_task_output_from_server()
     else
         printf("[DEBUG] opened FIFO for reading\n");
 
+    write(1,"\n",1);
+
     while ((bytes_read = read(fd_fifo_server_client, buffer, BUFFER_SIZE)) > 0) {
-        //printf("[DEBUG] received '%s' from server\n", buffer);
-
         write(1, buffer, bytes_read);
-
         bzero(buffer, BUFFER_SIZE);
     }
 
-    close(fd_fifo_server_client);
+    write(1,"\n",1);
 }
+
+
 
 /**
  * @brief           Função que recebe uma string com um comando passado pelo stdin(extenso) e tranforma num comando a ser interpretado pelo server(simplificado)

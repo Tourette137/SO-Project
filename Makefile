@@ -3,8 +3,8 @@ CFLAGS = -Wall -g -I$(INCDIR)
 OBJDIR = obj
 SRCDIR = src
 INCDIR = includes
-OBJS = $(OBJDIR)/auxs.o $(OBJDIR)/task.o $(OBJDIR)/server_child.o
-SERVER_OBJS = $(OBJDIR)/server.o
+OBJS = $(OBJDIR)/auxs.o $(OBJDIR)/task.o
+SERVER_OBJS = $(OBJDIR)/server.o $(OBJDIR)/server_child.o
 CLIENT_OBJS = $(OBJDIR)/client.o
 
 all:
