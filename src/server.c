@@ -126,6 +126,7 @@ int main(int argc, char const** argv)
 
         bzero(buffer, BUFFER_SIZE);
 
+        // Open pipe for client->server communication
         if ((fd_fifo_client_server = open(CLIENT_SERVER_PIPENAME, O_RDONLY)) == -1) {
             perror("Open client->server pipe");
             return -1;
@@ -133,6 +134,14 @@ int main(int argc, char const** argv)
         else {
             printf("[DEBUG] opened FIFO for reading\n");
         }
+
+        // Open pipe for server->client communication
+        if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_WRONLY)) == -1) {
+            perror("Open server->client pipe");
+            return -1;
+        }
+        else
+            printf("[DEBUG] opened FIFO for writing\n");
 
         // Get client PID
         read(fd_fifo_client_server, buffer, BUFFER_SIZE);
@@ -145,6 +154,7 @@ int main(int argc, char const** argv)
         }
 
         close(fd_fifo_client_server);
+        close(fd_fifo_server_client);
     }
 
     return 0;
@@ -158,12 +168,6 @@ void write_task_output_to_client(int task_id)
 
     kill(client_pid, SIGUSR1);
 
-    // Open pipe for server->client communication
-    if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_WRONLY)) == -1)
-        perror("Open server->client pipe");
-    else
-        printf("[DEBUG] opened FIFO for writing\n");
-
     ssize_t bytes_read;
     char buffer[BUFFER_SIZE];
 
@@ -174,8 +178,9 @@ void write_task_output_to_client(int task_id)
         write(fd_fifo_server_client, buffer, bytes_read);
     }
 
+    write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
+
     close(fd_result_output);
-    close(fd_fifo_server_client);
 
     if (remove_file(result_output_filename) == -1)
         perror("Remove output file");
@@ -204,12 +209,6 @@ void write_output_to_client(char* command)
     int written_bytes;
 
     kill(client_pid, SIGUSR1);
-
-    // Open pipe for server->client communication
-    if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_WRONLY)) == -1)
-        perror("Open server->client pipe");
-    else
-        printf("[DEBUG] opened FIFO for writing\n");
 
     if (strncmp(command,"-l",2) == 0) {
         for(int i = 0; i < total_tasks_history; i++) {
@@ -256,7 +255,7 @@ void write_output_to_client(char* command)
         write(fd_fifo_server_client, " ", 1);
     }
 
-    close(fd_fifo_server_client);
+    write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
 }
 
 /**
@@ -283,15 +282,21 @@ void read_client_command(char* command)
         write_output_to_client(command);
     }
     else if (strncmp(command, "-t", 2) == 0) {
-        int n = atoi(command+3);
+        int task_id = atoi(command+3);
 
         for (int i = 0; i < total_tasks_running; i++) {
-            if (tasks_running[i]->id == n) {
+            if (tasks_running[i]->id == task_id) {
                 pid_t server_child_pid = tasks_running[i]->pid;
                 kill(server_child_pid, SIGINT);
                 break;
             }
         }
+
+        char result_output_filename[BUFFER_SIZE];
+        sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+        if (remove_file(result_output_filename) == -1)
+            perror("Remove output file");
+
         write_output_to_client(command);
     }
     else if (strncmp(command, "-r", 2) == 0) {

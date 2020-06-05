@@ -10,6 +10,8 @@
 #include "../includes/auxs.h"
 
 int execution_mode;
+int fd_fifo_server_client;
+int fd_fifo_client_server;
 
 void simplify_command(char*, ssize_t);
 void read_output_from_server();
@@ -28,7 +30,6 @@ int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler_client);
 
-    int fd_fifo_client_server;
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read = 1;
 
@@ -37,6 +38,12 @@ int main(int argc, char const** argv)
         perror("Open client->server pipe");
     else
         printf("[DEBUG] opened FIFO for writing\n");
+
+    // Open pipe for server->client communication
+    if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_RDONLY)) == -1)
+        perror("Open server->client pipe");
+    else
+        printf("[DEBUG] opened FIFO for reading\n");
 
     sprintf(buffer, "%d", getpid());
     write(fd_fifo_client_server, buffer, strlen(buffer));
@@ -77,19 +84,20 @@ void read_output_from_server()
 {
     ssize_t bytes_read;
     char buffer[BUFFER_SIZE];
-    int fd_fifo_server_client;
-
-    // Open pipe for server->client communication
-    if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_RDONLY)) == -1)
-        perror("Open server->client pipe");
-    else
-        printf("[DEBUG] opened FIFO for reading\n");
 
     write(1,"\n",1);
 
-    while ((bytes_read = read(fd_fifo_server_client, buffer, BUFFER_SIZE)) > 0) {
-        write(1, buffer, bytes_read);
+    while (1) {
         bzero(buffer, BUFFER_SIZE);
+        bytes_read = read(fd_fifo_server_client, buffer, BUFFER_SIZE);
+
+        if (strstr(buffer,PIPE_COMMUNICATION_EOF) != NULL) {
+            write(1, buffer, bytes_read - PIPE_COMMUNICATION_EOF_SIZE);
+            break;
+        }
+        else {
+            write(1, buffer, bytes_read);
+        }
     }
 
     write(1,"\n",1);
