@@ -45,9 +45,11 @@ void write_output_to_client(char*);
  */
 void SIGUSR1_handler(int signum)
 {
+    // Server waits for child to exit
     int status;
     int pid = wait(&status);
 
+    // Server finds the task corresponding to the pid and sets its status accordingly to the exit status of the child
     for(int i = 0; i < total_tasks_running; i++) {
         if(tasks_running[i]->pid == pid) {
             int task_id = tasks_running[i]->id;
@@ -75,7 +77,7 @@ void SIGUSR1_handler(int signum)
                 }
             }
 
-            // Remove temporary output file created
+            // Remove task temporary output file created
             char result_output_filename[BUFFER_SIZE];
             sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
             if (remove_file(result_output_filename) == -1)
@@ -132,7 +134,7 @@ int main(int argc, char const** argv)
     char buffer[BUFFER_SIZE];
     size_t bytes_read;
 
-    // Open file for replacing stderror
+    // Open file to replace stderror
     default_fd_error = open(ERROR_FILENAME, O_CREAT | O_WRONLY | O_TRUNC, 0600);
     if (default_fd_error == -1) {
         perror("Open error file");
@@ -182,12 +184,14 @@ int main(int argc, char const** argv)
         read(fd_fifo_client_server, buffer, BUFFER_SIZE);
         client_pid = atoi(buffer);
 
+        // Run cicle waiting for client input
         while ((bytes_read = read(fd_fifo_client_server, buffer, BUFFER_SIZE)) > 0) {
             printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
         }
 
+        // Close pipe file descriptors
         close(fd_fifo_client_server);
         close(fd_fifo_server_client);
     }
@@ -259,10 +263,12 @@ void read_client_command(char* command)
  */
 void add_task_to_server(char* command)
 {
+    // Add task to server task history
     total_tasks_history++;
     tasks_history = realloc(tasks_history, total_tasks_history * sizeof(TASK));
     tasks_history[total_tasks_history-1] = initTask(total_tasks_history, 0, command, TASK_RUNNING);
 
+    // Add task to server current running tasks
     total_tasks_running++;
     tasks_running = realloc(tasks_running, total_tasks_running * sizeof(TASK));
     tasks_running[total_tasks_running-1] = initTask(total_tasks_history, 0, command, TASK_RUNNING);
@@ -275,8 +281,9 @@ void add_task_to_server(char* command)
 void launch_task_on_server(char* command)
 {
     int task_id = total_tasks_history;
-    pid_t pid = fork();
 
+    // Launch a child to run a task
+    pid_t pid = fork();
     switch (pid) {
         case -1:
             perror("Fork");
@@ -314,8 +321,10 @@ void change_max_execution_time (int seconds)
  */
 void remove_task_from_server (int task_id, int task_running_ind, int terminated_status)
 {
+    // Set task status on server task history
     tasks_history[task_id-1]->status = terminated_status;
 
+    // Remove task from server current running tasks
     tasks_running[task_running_ind] = tasks_running[total_tasks_running-1];
     total_tasks_running--;
     tasks_running = realloc(tasks_running, total_tasks_running);
@@ -339,7 +348,7 @@ void write_task_output_from_log_file_to_client(int task_id)
     off_t start_pos;
     int total_bytes = -1;
 
-    // Reading log index file to find task output position in log file
+    // Read log index file to find task output position in log file
     char buffer[BUFFER_SIZE];
     char* aux_string;
     int aux_task_id;
@@ -361,7 +370,7 @@ void write_task_output_from_log_file_to_client(int task_id)
     // Set log file offset to task output start
     lseek(fd_log_file, start_pos, SEEK_SET);
 
-    // Reading log file and writing to client
+    // Read task output from log file and write it to client
     kill(client_pid, SIGUSR1);
 
     size_t bytes_read, total_bytes_read = 0;
@@ -393,7 +402,7 @@ void write_task_output_from_log_file_to_client(int task_id)
  */
 void write_task_output_to_log_file(int task_id)
 {
-    // Open task output temporary file
+    // Open task temporary output file
     char result_output_filename[BUFFER_SIZE];
     sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
     int fd_result_output = open(result_output_filename, O_RDONLY);
@@ -404,21 +413,20 @@ void write_task_output_to_log_file(int task_id)
     // Open log index file
     int fd_log_index_file = open(LOG_INDEX_FILENAME, O_CREAT | O_WRONLY | O_APPEND, 0600);
 
-    // Set variable to write on file index file
+    // Set variables to update log index file
     off_t start_pos = lseek(fd_log_file, 0, SEEK_END);
     int total_bytes = 0;
 
-    // Reading from task output file and writing to log file
+    // Read from task temporary output file and write it to log file
     char buffer[BUFFER_SIZE];
     size_t bytes_read;
 
-    // Updating log file
     while ((bytes_read = read(fd_result_output, buffer, BUFFER_SIZE)) > 0) {
         write(fd_log_file, buffer, bytes_read);
         total_bytes += bytes_read;
     }
 
-    // Updating log index file
+    // Update log index file
     bytes_read = sprintf(buffer, "%d:%ld:%d\n", task_id, start_pos, total_bytes);
     write(fd_log_index_file, buffer, bytes_read);
 
@@ -434,12 +442,15 @@ void write_task_output_to_log_file(int task_id)
  */
 void write_task_output_to_client(int task_id)
 {
+    // Open task temporary output file
     char result_output_filename[BUFFER_SIZE];
     sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
     int fd_result_output = open(result_output_filename, O_RDONLY);
 
+    // Warn client that server is about to write on the server->child pipe
     kill(client_pid, SIGUSR1);
 
+    // Read from task temporary output file and send it to client
     size_t bytes_read;
     char buffer[BUFFER_SIZE];
 
@@ -452,6 +463,7 @@ void write_task_output_to_client(int task_id)
 
     write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
 
+    // Close file descriptors
     close(fd_result_output);
 }
 
@@ -461,10 +473,12 @@ void write_task_output_to_client(int task_id)
  */
 void write_output_to_client(char* command)
 {
+    // Warn client that server is about to write on the server->child pipe
+    kill(client_pid, SIGUSR1);
+
+    // Send corresponding command output to client
     char buffer[BUFFER_SIZE];
     int written_bytes;
-
-    kill(client_pid, SIGUSR1);
 
     if (strncmp(command,"-l",2) == 0) {
         for(int i = 0; i < total_tasks_history; i++) {

@@ -22,8 +22,10 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 
 clean:
 	rm -f $(OBJDIR)/*.o
-	rm server
-	rm client
-	rm server_client_pipe
-	rm client_server_pipe
-	rm error.txt
+	rm -f server
+	rm -f client
+	rm -f server_client_pipe
+	rm -f client_server_pipe
+	rm -f error.txt
+	rm -f log.txt
+	rm -f log.idx

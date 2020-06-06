@@ -27,7 +27,7 @@ void SIGUSR1_handler_client(int signum)
 {
     read_output_from_server();
 
-    if (execution_mode == 0)
+    if (execution_mode == COMMAND_LINE_EXECUTION_MODE)
         _exit(0);
     else
         write(1, "    $ ", 6);
@@ -55,30 +55,40 @@ int main(int argc, char const** argv)
     else
         printf("[DEBUG] opened FIFO for reading\n");
 
+    // Send client pid to server
     sprintf(buffer, "%d", getpid());
     write(fd_fifo_client_server, buffer, strlen(buffer));
 
-    if (argc > 1) {
-        execution_mode = 0;
+    // Set current execution mode
+    execution_mode = argc > 1 ? COMMAND_LINE_EXECUTION_MODE : INTERPRETER_EXECUTION_MODE;
+
+    // Read input from command line arguments and send it to server
+    if (execution_mode == COMMAND_LINE_EXECUTION_MODE) {
+        // Parsing command from arguments
         strcpy(buffer, argv[1]);
         for (int i = 2; i < argc; i++) {
             strcat(buffer, " ");
             strcat(buffer, argv[i]);
         }
 
+        // Send command to server
         write(fd_fifo_client_server, buffer, strlen(buffer));
         printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
+        // Wait for server to finish command execution
         while(1);
     }
-    else {
-        execution_mode = 1;
+
+    // Run an interpreter an send the information to server
+    if (execution_mode == INTERPRETER_EXECUTION_MODE) {
         write(1, "    $ ", 6);
         while (1) {
+            // Read input from user
             bytes_read = readln(0, buffer, BUFFER_SIZE);
 
             if (strcmp(buffer, "exit") == 0) break;
 
+            // Interprete input and send it to server
             simplify_command(buffer, bytes_read);
             write(fd_fifo_client_server, buffer, bytes_read);
             printf("[DEBUG] wrote '%s' to fifo\n", buffer);
@@ -88,6 +98,7 @@ int main(int argc, char const** argv)
         }
     }
 
+    // Close file descriptors
     close(fd_fifo_client_server);
 
     return 0;
@@ -107,9 +118,11 @@ void read_output_from_server()
     write(1,"\n",1);
 
     while (1) {
+        // Read output send from server
         bzero(buffer, BUFFER_SIZE);
         bytes_read = read(fd_fifo_server_client, buffer, BUFFER_SIZE);
 
+        // Write output received to stdout, always checking for EOF
         if (strstr(buffer,PIPE_COMMUNICATION_EOF) != NULL) {
             write(1, buffer, bytes_read - PIPE_COMMUNICATION_EOF_SIZE);
             break;

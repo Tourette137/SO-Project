@@ -92,19 +92,23 @@ void server_child_start(int task_id, char* commands)
     signal(SIGALRM, SIGALRM_handler_server_child);
     signal(SIGINT, SIGINT_handler_server_child);
 
+    // Open task temporary output file
     char result_output_filename[BUFFER_SIZE];
     sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
-
     fd_result_output = open(result_output_filename, O_CREAT | O_WRONLY | O_TRUNC, 0600);
     if (fd_result_output == -1) {
         perror("Open error file");
         fd_result_output = 1;
     }
 
+    // Execute task command(s)
     if (exec_chained_commands(commands) == -1)
         perror("Execute task");
 
+    // Warn server that task has been terminated
     kill(getppid(), SIGUSR1);
+
+    // Exit with task terminated status
     _exit(EXIT_STATUS_TERMINATED);
 }
 
@@ -149,18 +153,20 @@ int exec_chained_commands (char* commands)
     int p[number_of_commands-1][2];
     int status [number_of_commands];
 
-    // Parsing da string com os comandos para um array com os comandos
+    // Parse commands from a string
     for(int i = 0; i < number_of_commands; i++) {
         line = strsep(&commands,"|");
         commands_array[i] = strdup(line);
     }
 
+    // Start a timer to control task execution time
     kill(getpid(), SIGALRM);
-    // Execução dos comandos
+
+    // Command(s) execution
     if (number_of_commands == 1) {
 
+        // Create a child to run the command
         pid_t fork_pid = fork();
-
         switch (fork_pid) {
             case -1:
                 perror("Fork");
@@ -177,6 +183,7 @@ int exec_chained_commands (char* commands)
     else {
         for (int i = 0; i < number_of_commands; i++) {
 
+            // First command execution
             if (i == 0) {
 
                 if (pipe(p[i]) != 0) {
@@ -184,8 +191,8 @@ int exec_chained_commands (char* commands)
                     return -1;
                 }
 
+                // Create a child to run the command
                 pid_t fork_pid = fork();
-
                 switch(fork_pid) {
                     case -1:
                         perror("Fork");
@@ -193,14 +200,13 @@ int exec_chained_commands (char* commands)
                     case 0:
                         signal(SIGALRM, SIGALRM_handler_server_child_command);
 
-                        // codigo do filho 0
                         close(p[i][0]);
 
                         dup2(p[i][1],1);
                         close(p[i][1]);
 
+                        // Create a child to run the command and start a timer to control pipe inactivity time
                         fork_pid = fork();
-
                         switch (fork_pid) {
                             case -1:
                                 perror("Fork");
@@ -220,17 +226,16 @@ int exec_chained_commands (char* commands)
 
                 }
             }
+            // Last command execution
             else if (i == number_of_commands-1) {
 
+                // Create a child to run the command
                 pid_t fork_pid = fork();
-
                 switch(fork_pid) {
                     case -1:
                         perror("Fork");
                         return -1;
                     case 0:
-                        // codigo do filho n-1
-                        //close(p[i-1][1]); //Já está fechado do anterior
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
@@ -243,6 +248,7 @@ int exec_chained_commands (char* commands)
 
                 }
             }
+            // Intermediate command(s) execution
             else {
 
                 if (pipe(p[i]) != 0) {
@@ -250,8 +256,8 @@ int exec_chained_commands (char* commands)
                     return -1;
                 }
 
+                // Create a child to run the command
                 pid_t fork_pid = fork();
-
                 switch(fork_pid) {
                     case -1:
                         perror("Fork");
@@ -259,8 +265,6 @@ int exec_chained_commands (char* commands)
                     case 0:
                         signal(SIGALRM, SIGALRM_handler_server_child_command);
 
-                        // codigo do filho i
-                        //close(p[i-1][1]); //Fechado no anterior
                         close(p[i][0]);
 
                         dup2(p[i][1],1);
@@ -269,8 +273,8 @@ int exec_chained_commands (char* commands)
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
+                        // Create a child to run the command and start a timer to control pipe inactivity time
                         fork_pid = fork();
-
                         switch (fork_pid) {
                             case -1:
                                 perror("Fork");
@@ -292,6 +296,7 @@ int exec_chained_commands (char* commands)
                 }
             }
 
+            // Wait for child to execute a command and interprete its exit status
             wait(&status[i]);
             if (WIFEXITED(status[i])) {
                 if (WEXITSTATUS(status[i]) == EXIT_STATUS_INACTIVITY) {
@@ -303,6 +308,7 @@ int exec_chained_commands (char* commands)
         }
     }
 
+    // Free memory allocated for storing the commands
     for (int c = 0; c < number_of_commands; c++) {
         free(commands_array[c]);
     }
