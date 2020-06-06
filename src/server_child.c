@@ -20,12 +20,14 @@ int max_execution_time;
 int current_execution_time = 0;
 
 int exec_command(char*);
-int execute_Chained_Commands(char*, int);
+int exec_chained_commands(char*);
 
+
+//----------------------------PARENT SIGNAL HANDLERS----------------------------//
 
 /**
- * @brief           Handler do SIGALRM da tarefa de comandos encadeados por pipes a executar
- * @param singum    Inteiro remetente ao tipo de sinal transmitido
+ * @brief           Signal usado para medir o tempo de execução de uma tarefa
+ * @param signum    Identificador do signal recebido
  */
 void SIGALRM_handler_server_child(int signum)
 {
@@ -38,6 +40,10 @@ void SIGALRM_handler_server_child(int signum)
     alarm(1);
 }
 
+/**
+ * @brief           Signal usado para indicar a interrupção de uma tarefa
+ * @param signum    Identificador do signal recebido
+ */
 void SIGINT_handler_server_child(int signum)
 {
     kill(child_pid, SIGINT);
@@ -46,9 +52,12 @@ void SIGINT_handler_server_child(int signum)
     _exit(EXIT_STATUS_TERMINATED_INTERRUPTED);
 }
 
+
+//----------------------------CHILD SIGNAL HANDLERS----------------------------//
+
 /**
- * @brief           Handler do SIGALRM para os processos que executam um comandos da tarefa de comandos encadeados por pipes a executar
- * @param singum    Inteiro remetente ao tipo de sinal transmitido
+ * @brief           Signal usado para medir o tempo de inatividade num pipe anónimo (apenas usado pelos filhos)
+ * @param signum    Identificador do signal recebido
  */
 void SIGALRM_handler_server_child_command(int signum)
 {
@@ -60,6 +69,10 @@ void SIGALRM_handler_server_child_command(int signum)
     alarm(1);
 }
 
+/**
+ * @brief           Signal usado para indicar a interrupção de uma tarefa (apenas usado pelos filhos)
+ * @param signum    Identificador do signal recebido
+ */
 void SIGINT_handler_server_child_command(int signum)
 {
     kill(child_pid, SIGKILL);
@@ -67,13 +80,20 @@ void SIGINT_handler_server_child_command(int signum)
 }
 
 
-void server_child_start(int task_id, char* command)
+//----------------------------MAIN FUNCTION----------------------------//
+
+/**
+ * @brief           Função que inicializa a execução de uma tarefa
+ * @param task_id   ID da tarefa a ser inicializada
+ * @param commands  Comandos a ser executados
+ */
+void server_child_start(int task_id, char* commands)
 {
     signal(SIGALRM, SIGALRM_handler_server_child);
     signal(SIGINT, SIGINT_handler_server_child);
 
     char result_output_filename[BUFFER_SIZE];
-    sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+    sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
 
     fd_result_output = open(result_output_filename, O_CREAT | O_WRONLY | O_TRUNC, 0600);
     if (fd_result_output == -1) {
@@ -81,7 +101,7 @@ void server_child_start(int task_id, char* command)
         fd_result_output = 1;
     }
 
-    if (execute_Chained_Commands(command, task_id) == -1)
+    if (exec_chained_commands(commands) == -1)
         perror("Execute task");
 
     kill(getppid(), SIGUSR1);
@@ -89,10 +109,12 @@ void server_child_start(int task_id, char* command)
 }
 
 
+//----------------------------SECONDARY FUNCTIONS----------------------------//
+
 /**
- * @brief           Função que executa um comando dado
- * @param command   Comando que queremos executar
- * @return          Inteiro que revela se comando pedido executou corretamente ou não
+ * @brief           Função que executa um comando
+ * @param command   Comando a ser executado
+ * @return		    Valor de retorno da execução do comando
  */
 int exec_command (char* command)
 {
@@ -114,12 +136,12 @@ int exec_command (char* command)
     return exec_ret;
 }
 
-
 /**
  * @brief           Função que executa uma lista de comandos em execução encadeada através de pipes
+ * @param commands  Lista de comandos a ser executados
  * @return          Inteiro que revela se execução de comandos correu bem
  */
-int execute_Chained_Commands (char* commands, int id)
+int exec_chained_commands (char* commands)
 {
     char* line;
     int number_of_commands = strcnt(commands, '|') + 1;

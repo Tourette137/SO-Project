@@ -10,12 +10,19 @@
 #include "../includes/auxs.h"
 
 int execution_mode;
-int fd_fifo_server_client;
 int fd_fifo_client_server;
+int fd_fifo_server_client;
 
-void simplify_command(char*, ssize_t);
+void simplify_command(char*, size_t);
 void read_output_from_server();
 
+
+//----------------------------SIGNAL HANDLERS----------------------------//
+
+/**
+ * @brief           Signal usado para informar o cliente que uma tarefa terminou a sua execução
+ * @param signum    Identificador do signal recebido
+ */
 void SIGUSR1_handler_client(int signum)
 {
     read_output_from_server();
@@ -26,12 +33,15 @@ void SIGUSR1_handler_client(int signum)
         write(1, "    $ ", 6);
 }
 
+
+//----------------------------MAIN FUNCTION----------------------------//
+
 int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler_client);
 
     char buffer[BUFFER_SIZE];
-    ssize_t bytes_read = 1;
+    size_t bytes_read = 1;
 
     // Open pipe for client->server communication
     if ((fd_fifo_client_server = open(CLIENT_SERVER_PIPENAME, O_WRONLY)) == -1)
@@ -64,10 +74,12 @@ int main(int argc, char const** argv)
     else {
         execution_mode = 1;
         write(1, "    $ ", 6);
-        while (strcmp(buffer, "exit") != 0) {
+        while (1) {
             bytes_read = readln(0, buffer, BUFFER_SIZE);
-            simplify_command(buffer, bytes_read);
 
+            if (strcmp(buffer, "exit") == 0) break;
+
+            simplify_command(buffer, bytes_read);
             write(fd_fifo_client_server, buffer, bytes_read);
             printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
@@ -81,9 +93,15 @@ int main(int argc, char const** argv)
     return 0;
 }
 
+
+//----------------------------SECONDARY FUNCTIONS----------------------------//
+
+/**
+ * @brief   Função que recebe, do servidor, o output de uma tarefa ou comando
+ */
 void read_output_from_server()
 {
-    ssize_t bytes_read;
+    size_t bytes_read;
     char buffer[BUFFER_SIZE];
 
     write(1,"\n",1);
@@ -104,14 +122,12 @@ void read_output_from_server()
     write(1,"\n",1);
 }
 
-
-
 /**
- * @brief           Função que recebe uma string com um comando passado pelo stdin(extenso) e tranforma num comando a ser interpretado pelo server(simplificado)
+ * @brief           Função que recebe uma string com um comando passado pelo stdin(extenso) e tranforma num comando a ser interpretado pelo servidor(simplificado)
  * @param command   Comando a ser simplificado
  * @param size      Tamanho do comando recebido
  */
-void simplify_command(char* command, ssize_t size)
+void simplify_command(char* command, size_t size)
 {
     char command_i[] = "tempo-inactividade ";
     char command_m[] = "tempo-execucao ";

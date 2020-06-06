@@ -12,9 +12,6 @@
 #include "../includes/task.h"
 #include "../includes/server_child.h"
 
-//TODO:
-//      - Apanhar a puta;
-
 pid_t client_pid;
 int default_fd_error;
 int fd_fifo_client_server;
@@ -27,21 +24,25 @@ int total_tasks_history = 0;
 TASK* tasks_running = NULL;
 int total_tasks_running = 0;
 
+void read_client_command(char*);
+void add_task_to_server(char*);
+void launch_task_on_server(char*);
+void change_max_inactivity_time(int);
+void change_max_execution_time(int);
+void remove_task_from_server (int, int, int);
+
 void write_task_output_from_log_file_to_client(int);
 void write_task_output_to_log_file(int);
 void write_task_output_to_client(int);
-int remove_file(char*);
-void launch_task_on_server(char*);
-void read_client_command(char*);
-void print_server_running_tasks();
-void print_server_terminated_tasks();
-void print_help_menu();
-void add_task_to_server(char*);
-void changeMaxInactivityTime(int);
-void changeMaxExecutionTime(int);
-void end_task_given (int, int, int);
+void write_output_to_client(char*);
 
 
+//----------------------------SIGNAL HANDLERS----------------------------//
+
+/**
+ * @brief           Signal usado para informar o servidor que uma tarefa terminou a sua execução
+ * @param signum    Identificador do signal recebido
+ */
 void SIGUSR1_handler(int signum)
 {
     int status;
@@ -54,21 +55,21 @@ void SIGUSR1_handler(int signum)
             if (WIFEXITED(status)) {
                 switch (WEXITSTATUS(status)) {
                     case EXIT_STATUS_TERMINATED:
-                        end_task_given(task_id-1, i, TASK_TERMINATED);
+                        remove_task_from_server(task_id, i, TASK_TERMINATED);
                         printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED\n", task_id);
                         write_task_output_to_client(task_id);
                         write_task_output_to_log_file(task_id);
                         break;
                     case EXIT_STATUS_INACTIVITY:
-                        end_task_given(task_id-1, i, TASK_TERMINATED_INACTIVITY);
+                        remove_task_from_server(task_id, i, TASK_TERMINATED_INACTIVITY);
                         printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_INACTIVITY\n", task_id);
                         break;
                     case EXIT_STATUS_EXECUTION_TIME:
-                        end_task_given(task_id-1, i, TASK_TERMINATED_EXECUTION_TIME);
+                        remove_task_from_server(task_id, i, TASK_TERMINATED_EXECUTION_TIME);
                         printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_EXECUTION_TIME\n", task_id);
                         break;
                     case EXIT_STATUS_TERMINATED_INTERRUPTED:
-                        end_task_given(task_id-1, i, TASK_TERMINATED_INTERRUPTED);
+                        remove_task_from_server(task_id, i, TASK_TERMINATED_INTERRUPTED);
                         printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_INTERRUPTED\n", task_id);
                         break;
                 }
@@ -76,7 +77,7 @@ void SIGUSR1_handler(int signum)
 
             // Remove temporary output file created
             char result_output_filename[BUFFER_SIZE];
-            sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+            sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
             if (remove_file(result_output_filename) == -1)
                 perror("Remove output file");
 
@@ -85,22 +86,35 @@ void SIGUSR1_handler(int signum)
     }
 }
 
-
-
+/**
+ * @brief           Signal usado para terminar a execução do servidor
+ * @param signum    Identificador do signal recebido
+ */
 void SIGINT_handler_server(int signum)
 {
+    // Remove all temporary files related to running tasks
+    char buffer[BUFFER_SIZE];
+    for (int i = 0; i < total_tasks_running; i++) {
+        sprintf(buffer, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, tasks_running[i]->id);
+        remove_file(buffer);
+    }
+
+    // Free tasks history alocated memory
     for (int i = 0; i < total_tasks_history; i++)
         freeTask(tasks_history[i]);
     free(tasks_history);
 
+    // Free tasks running alocated memory
     for (int i = 0; i < total_tasks_running; i++)
         freeTask(tasks_running[i]);
     free(tasks_running);
 
+    // Close file descriptors
     close(default_fd_error);
     close(fd_fifo_client_server);
     close(fd_fifo_server_client);
 
+    // Print running errors
     printf("\n\n\n\tRunning Errors:\n\n");
     execlp("cat", "cat", ERROR_FILENAME, NULL);
 
@@ -108,13 +122,15 @@ void SIGINT_handler_server(int signum)
 }
 
 
+//----------------------------MAIN FUNCTION----------------------------//
+
 int main(int argc, char const** argv)
 {
     signal(SIGUSR1, SIGUSR1_handler);
     signal(SIGINT, SIGINT_handler_server);
 
     char buffer[BUFFER_SIZE];
-    ssize_t bytes_read;
+    size_t bytes_read;
 
     // Open file for replacing stderror
     default_fd_error = open(ERROR_FILENAME, O_CREAT | O_WRONLY | O_TRUNC, 0600);
@@ -179,6 +195,139 @@ int main(int argc, char const** argv)
     return 0;
 }
 
+
+//----------------------------SECONDARY FUNCTIONS----------------------------//
+
+/**
+ * @brief           Função que recebe um comando(simplificado), interpreta-o e executa-o
+ * @param command   Comando a ser interpretado e executado
+ */
+void read_client_command(char* command)
+{
+    if (strncmp(command, "-i", 2) == 0) {
+        int n = atoi(command+3);
+        change_max_inactivity_time(n);
+        write_output_to_client(command);
+    }
+    else if (strncmp(command, "-m", 2) == 0) {
+        int n = atoi(command+3);
+        change_max_execution_time(n);
+        write_output_to_client(command);
+    }
+    else if (strncmp(command, "-e", 2) == 0) {
+        add_task_to_server(command+3);
+        launch_task_on_server(command+3);
+    }
+    else if (strncmp(command, "-l", 2) == 0) {
+        write_output_to_client(command);
+    }
+    else if (strncmp(command, "-t", 2) == 0) {
+        int task_id = atoi(command+3);
+
+        for (int i = 0; i < total_tasks_running; i++) {
+            if (tasks_running[i]->id == task_id) {
+                pid_t server_child_pid = tasks_running[i]->pid;
+                kill(server_child_pid, SIGINT);
+                break;
+            }
+        }
+
+        write_output_to_client(command);
+    }
+    else if (strncmp(command, "-r", 2) == 0) {
+        write_output_to_client(command);
+    }
+    else if (strncmp(command, "-h", 2) == 0) {
+        write_output_to_client(command);
+    }
+    else if (strncmp(command, "-o", 2) == 0) {
+        int task_id = atoi(command+3);
+        if (task_id <= total_tasks_history && tasks_history[task_id-1]->status == EXIT_STATUS_TERMINATED)
+            write_task_output_from_log_file_to_client(task_id);
+        else
+            write_output_to_client(command);
+    }
+    else {
+        printf("Received invalid input from client\n");
+        write_output_to_client(command);
+    }
+}
+
+/**
+ * @brief           Função que adiciona uma tarefa ao registo de tarefas do servidor
+ * @param command   Comando da tarefa a ser adicionada ao servidor
+ */
+void add_task_to_server(char* command)
+{
+    total_tasks_history++;
+    tasks_history = realloc(tasks_history, total_tasks_history * sizeof(TASK));
+    tasks_history[total_tasks_history-1] = initTask(total_tasks_history, 0, command, TASK_RUNNING);
+
+    total_tasks_running++;
+    tasks_running = realloc(tasks_running, total_tasks_running * sizeof(TASK));
+    tasks_running[total_tasks_running-1] = initTask(total_tasks_history, 0, command, TASK_RUNNING);
+}
+
+/**
+ * @brief           Função que inicia a execução de uma tarefa
+ * @param command   Comando da tarefa a ser executada
+ */
+void launch_task_on_server(char* command)
+{
+    int task_id = total_tasks_history;
+    pid_t pid = fork();
+
+    switch (pid) {
+        case -1:
+            perror("Fork");
+            return;
+        case 0:
+            server_child_start(task_id, command);
+        default:
+            tasks_running[total_tasks_running-1]->pid = pid;
+    }
+}
+
+/**
+ * @brief           Função que altera o tempo de Inatividade Máxima de comunicação entre um pipe anónimo
+ * @param seconds   Tempo de inatividade máxima (em segundos)
+ */
+void change_max_inactivity_time (int seconds)
+{
+    max_inactivity_time = seconds;
+}
+
+/**
+ * @brief           Função que altera o tempo de Execução Máxima de uma Tarefa
+ * @param seconds   Tempo de execução máxima (em segundos)
+ */
+void change_max_execution_time (int seconds)
+{
+    max_execution_time = seconds;
+}
+
+/**
+ * @brief                       Função que remove uma tarefa dos registos de tarefas do servidor
+ * @param task_id               ID da tarefa que queremos remover
+ * @param task_running_ind      Índice da tarefa no registo de tarefas a ser executadas do servidor
+ * @param terminated_status     Estado de término da tarefa
+ */
+void remove_task_from_server (int task_id, int task_running_ind, int terminated_status)
+{
+    tasks_history[task_id-1]->status = terminated_status;
+
+    tasks_running[task_running_ind] = tasks_running[total_tasks_running-1];
+    total_tasks_running--;
+    tasks_running = realloc(tasks_running, total_tasks_running);
+}
+
+
+//----------------------------WRITE OUTPUT FUNCTIONS----------------------------//
+
+/**
+ * @brief           Função que lê o output de uma tarefa no ficheiro de logs e manda a informação para o cliente
+ * @param task_id   ID da tarefa correspondente
+ */
 void write_task_output_from_log_file_to_client(int task_id)
 {
     // Open log file
@@ -215,7 +364,7 @@ void write_task_output_from_log_file_to_client(int task_id)
     // Reading log file and writing to client
     kill(client_pid, SIGUSR1);
 
-    ssize_t bytes_read, total_bytes_read = 0;
+    size_t bytes_read, total_bytes_read = 0;
 
     sprintf(buffer, "TASK #%d RESULT\n", task_id);
     write(fd_fifo_server_client, buffer, strlen(buffer));
@@ -238,11 +387,15 @@ void write_task_output_from_log_file_to_client(int task_id)
     close(fd_log_index_file);
 }
 
+/**
+ * @brief           Função que lê o output de uma tarefa de um ficheiro temporário e escreve no ficheiro de logs
+ * @param task_id   ID da tarefa correspondente
+ */
 void write_task_output_to_log_file(int task_id)
 {
     // Open task output temporary file
     char result_output_filename[BUFFER_SIZE];
-    sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+    sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
     int fd_result_output = open(result_output_filename, O_RDONLY);
 
     // Open log file
@@ -257,7 +410,7 @@ void write_task_output_to_log_file(int task_id)
 
     // Reading from task output file and writing to log file
     char buffer[BUFFER_SIZE];
-    ssize_t bytes_read;
+    size_t bytes_read;
 
     // Updating log file
     while ((bytes_read = read(fd_result_output, buffer, BUFFER_SIZE)) > 0) {
@@ -275,15 +428,19 @@ void write_task_output_to_log_file(int task_id)
     close(fd_log_index_file);
 }
 
+/**
+ * @brief           Função que lê o output de uma tarefa de um ficheiro temporário e manda a informação para o cliente
+ * @param task_id   ID da tarefa correspondente
+ */
 void write_task_output_to_client(int task_id)
 {
     char result_output_filename[BUFFER_SIZE];
-    sprintf(result_output_filename, "%s%d.txt", RESULT_OUTPUT_FILENAME, task_id);
+    sprintf(result_output_filename, "%s%d.txt", TASK_RESULT_OUTPUT_FILENAME, task_id);
     int fd_result_output = open(result_output_filename, O_RDONLY);
 
     kill(client_pid, SIGUSR1);
 
-    ssize_t bytes_read;
+    size_t bytes_read;
     char buffer[BUFFER_SIZE];
 
     sprintf(buffer, "TASK #%d RESULT\n", task_id);
@@ -298,23 +455,10 @@ void write_task_output_to_client(int task_id)
     close(fd_result_output);
 }
 
-int remove_file(char* filename)
-{
-    int status;
-
-    switch (fork()) {
-        case -1:
-            perror("Fork");
-            return -1;
-        case 0:
-            execlp("rm", "rm", filename, NULL);
-        default:
-            wait(&status);
-    }
-
-    return status;
-}
-
+/**
+ * @brief           Função que envia o output de um comando para o cliente
+ * @param task_id   Comando correspondente
+ */
 void write_output_to_client(char* command)
 {
     char buffer[BUFFER_SIZE];
@@ -368,123 +512,4 @@ void write_output_to_client(char* command)
     }
 
     write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
-}
-
-/**
- * @brief           Função que recebe um comando(simplificado), interpreta-o e executa-o
- * @param command   Comando a ser interpretado e executado
- */
-void read_client_command(char* command)
-{
-    if (strncmp(command, "-i", 2) == 0) {
-        int n = atoi(command+3);
-        changeMaxInactivityTime(n);
-        write_output_to_client(command);
-    }
-    else if (strncmp(command, "-m", 2) == 0) {
-        int n = atoi(command+3);
-        changeMaxExecutionTime(n);
-        write_output_to_client(command);
-    }
-    else if (strncmp(command, "-e", 2) == 0) {
-        add_task_to_server(command+3);
-        launch_task_on_server(command+3);
-    }
-    else if (strncmp(command, "-l", 2) == 0) {
-        write_output_to_client(command);
-    }
-    else if (strncmp(command, "-t", 2) == 0) {
-        int task_id = atoi(command+3);
-
-        for (int i = 0; i < total_tasks_running; i++) {
-            if (tasks_running[i]->id == task_id) {
-                pid_t server_child_pid = tasks_running[i]->pid;
-                kill(server_child_pid, SIGINT);
-                break;
-            }
-        }
-
-        write_output_to_client(command);
-    }
-    else if (strncmp(command, "-r", 2) == 0) {
-        write_output_to_client(command);
-    }
-    else if (strncmp(command, "-h", 2) == 0) {
-        write_output_to_client(command);
-    }
-    else if (strncmp(command, "-o", 2) == 0) {
-        int task_id = atoi(command+3);
-        if (task_id <= total_tasks_history && tasks_history[task_id-1]->status == EXIT_STATUS_TERMINATED)
-            write_task_output_from_log_file_to_client(task_id);
-        else
-            write_output_to_client(command);
-    }
-    else {
-        printf("Received invalid input from client\n");
-        write_output_to_client(command);
-    }
-}
-
-void launch_task_on_server(char* command)
-{
-    int task_id = total_tasks_history;
-    pid_t pid = fork();
-
-    switch (pid) {
-        case -1:
-            perror("Fork");
-            return;
-        case 0:
-            server_child_start(task_id, command);
-        default:
-            tasks_running[total_tasks_running-1]->pid = pid;
-    }
-}
-
-/**
- * @brief           Função que adiciona uma tarefa ao registo de tarefas do servidor
- * @param command   Comando da tarefa a ser adicionada ao servidor
- */
-void add_task_to_server(char* command)
-{
-    total_tasks_history++;
-    tasks_history = realloc(tasks_history, total_tasks_history * sizeof(TASK));
-    tasks_history[total_tasks_history-1] = initTask(total_tasks_history, 0, command, TASK_RUNNING);
-
-    total_tasks_running++;
-    tasks_running = realloc(tasks_running, total_tasks_running * sizeof(TASK));
-    tasks_running[total_tasks_running-1] = initTask(total_tasks_history, 0, command, TASK_RUNNING);
-}
-
-
-/**
- * @brief           Função que altera o tempo de Inatividade Máxima de comunicação entre um pipe anónimo
- * @param seconds   Tempo em segundos que queremos que seja o tempo de inatividade máxima
- */
-void changeMaxInactivityTime (int seconds)
-{
-    max_inactivity_time = seconds;
-}
-
-/**
- * @brief           Função que altera o tempo de Execução Máxima de uma Tarefa
- * @param seconds   Tempo em segundos que queremos que seja o tempo de execução máxima de uma tarefa
- */
-void changeMaxExecutionTime (int seconds)
-{
-    max_execution_time = seconds;
-}
-
-/**
- * @brief           Função que acaba com uma Task que esteja a ser executada
- * @param seconds   Tarefa que queremos terminar de maneira forçada
- */
-
-void end_task_given (int task_ind, int task_running_ind, int terminated_status)
-{
-    tasks_history[task_ind]->status = terminated_status;
-
-    tasks_running[task_running_ind] = tasks_running[total_tasks_running-1];
-    total_tasks_running--;
-    tasks_running = realloc(tasks_running, total_tasks_running);
 }
