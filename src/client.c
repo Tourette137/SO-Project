@@ -46,13 +46,13 @@ int main(int argc, char const** argv)
     // Open pipe for client->server communication
     if ((fd_fifo_client_server = open(CLIENT_SERVER_PIPENAME, O_WRONLY)) == -1)
         perror("Open client->server pipe");
-    else
+    else if (DEBUG_STATUS)
         printf("[DEBUG] opened FIFO for writing\n");
 
     // Open pipe for server->client communication
     if ((fd_fifo_server_client = open(SERVER_CLIENT_PIPENAME, O_RDONLY)) == -1)
         perror("Open server->client pipe");
-    else
+    else if (DEBUG_STATUS)
         printf("[DEBUG] opened FIFO for reading\n");
 
     // Send client pid to server
@@ -73,7 +73,7 @@ int main(int argc, char const** argv)
 
         // Send command to server
         write(fd_fifo_client_server, buffer, strlen(buffer));
-        printf("[DEBUG] wrote '%s' to fifo\n", buffer);
+        if (DEBUG_STATUS) printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
         // Wait for server to finish command execution
         while(1);
@@ -91,7 +91,7 @@ int main(int argc, char const** argv)
             // Interprete input and send it to server
             simplify_command(buffer, bytes_read);
             write(fd_fifo_client_server, buffer, bytes_read);
-            printf("[DEBUG] wrote '%s' to fifo\n", buffer);
+            if (DEBUG_STATUS) printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
             if (strncmp(buffer,"-e",2) == 0)
                 write(1, "    $ ", 6);

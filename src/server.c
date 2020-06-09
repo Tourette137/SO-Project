@@ -58,21 +58,21 @@ void SIGUSR1_handler(int signum)
                 switch (WEXITSTATUS(status)) {
                     case EXIT_STATUS_TERMINATED:
                         remove_task_from_server(task_id, i, TASK_TERMINATED);
-                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED\n", task_id);
+                        printf("TASK #%d done with exit code TASK_TERMINATED\n", task_id);
                         write_task_output_to_client(task_id);
                         write_task_output_to_log_file(task_id);
                         break;
                     case EXIT_STATUS_INACTIVITY:
                         remove_task_from_server(task_id, i, TASK_TERMINATED_INACTIVITY);
-                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_INACTIVITY\n", task_id);
+                        printf("TASK #%d done with exit code TASK_TERMINATED_INACTIVITY\n", task_id);
                         break;
                     case EXIT_STATUS_EXECUTION_TIME:
                         remove_task_from_server(task_id, i, TASK_TERMINATED_EXECUTION_TIME);
-                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_EXECUTION_TIME\n", task_id);
+                        printf("TASK #%d done with exit code TASK_TERMINATED_EXECUTION_TIME\n", task_id);
                         break;
                     case EXIT_STATUS_TERMINATED_INTERRUPTED:
                         remove_task_from_server(task_id, i, TASK_TERMINATED_INTERRUPTED);
-                        printf("[DEBUG] TASK #%d done with exit code TASK_TERMINATED_INTERRUPTED\n", task_id);
+                        printf("TASK #%d done with exit code TASK_TERMINATED_INTERRUPTED\n", task_id);
                         break;
                 }
             }
@@ -168,7 +168,7 @@ int main(int argc, char const** argv)
             perror("Open client->server pipe");
             return -1;
         }
-        else {
+        else if (DEBUG_STATUS) {
             printf("[DEBUG] opened FIFO for reading\n");
         }
 
@@ -177,8 +177,9 @@ int main(int argc, char const** argv)
             perror("Open server->client pipe");
             return -1;
         }
-        else
+        else if (DEBUG_STATUS) {
             printf("[DEBUG] opened FIFO for writing\n");
+        }
 
         // Get client PID
         read(fd_fifo_client_server, buffer, BUFFER_SIZE);
@@ -186,7 +187,7 @@ int main(int argc, char const** argv)
 
         // Run cicle waiting for client input
         while ((bytes_read = read(fd_fifo_client_server, buffer, BUFFER_SIZE)) > 0) {
-            printf("[DEBUG] received '%s' from client\n", buffer);
+            if (DEBUG_STATUS) printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
         }
