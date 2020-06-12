@@ -30,7 +30,7 @@ void SIGUSR1_handler_client(int signum)
     if (execution_mode == COMMAND_LINE_EXECUTION_MODE)
         _exit(0);
     else
-        write(1, "    $ ", 6);
+        write(1, "argus$ ", 7);
 }
 
 
@@ -81,7 +81,7 @@ int main(int argc, char const** argv)
 
     // Run an interpreter an send the information to server
     if (execution_mode == INTERPRETER_EXECUTION_MODE) {
-        write(1, "    $ ", 6);
+        write(1, "argus$ ", 7);
         while (1) {
             // Read input from user
             bytes_read = readln(0, buffer, BUFFER_SIZE);
@@ -94,7 +94,7 @@ int main(int argc, char const** argv)
             if (DEBUG_STATUS) printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
             if (strncmp(buffer,"-e",2) == 0)
-                write(1, "    $ ", 6);
+                write(1, "argus$ ", 7);
         }
     }
 
@@ -115,7 +115,7 @@ void read_output_from_server()
     size_t bytes_read;
     char buffer[BUFFER_SIZE];
 
-    write(1,"\n",1);
+    write(1,"\n\n",2);
 
     while (1) {
         // Read output send from server
