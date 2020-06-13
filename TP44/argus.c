@@ -6,8 +6,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#include "../includes/macros.h"
-#include "../includes/auxs.h"
+#include "argus.h"
 
 int execution_mode;
 int fd_fifo_client_server;
@@ -76,7 +75,7 @@ int main(int argc, char const** argv)
         if (DEBUG_STATUS) printf("[DEBUG] wrote '%s' to fifo\n", buffer);
 
         // Wait for server to finish command execution
-        while(1);
+        pause();
     }
 
     // Run an interpreter an send the information to server

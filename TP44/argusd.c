@@ -7,10 +7,7 @@
 #include <sys/stat.h>
 #include <signal.h>
 
-#include "../includes/macros.h"
-#include "../includes/auxs.h"
-#include "../includes/task.h"
-#include "../includes/server_child.h"
+#include "argus.h"
 
 pid_t client_pid;
 int default_fd_error;
@@ -59,7 +56,6 @@ void SIGUSR1_handler(int signum)
                     case EXIT_STATUS_TERMINATED:
                         remove_task_from_server(task_id, i, TASK_TERMINATED);
                         printf("TASK #%d done with exit code TASK_TERMINATED\n", task_id);
-                        write_task_output_to_client(task_id);
                         write_task_output_to_log_file(task_id);
                         break;
                     case EXIT_STATUS_INACTIVITY:
@@ -75,6 +71,7 @@ void SIGUSR1_handler(int signum)
                         printf("TASK #%d done with exit code TASK_TERMINATED_INTERRUPTED\n", task_id);
                         break;
                 }
+                write_task_output_to_client(task_id);
             }
 
             // Remove task temporary output file created
@@ -187,6 +184,7 @@ int main(int argc, char const** argv)
 
         // Run cicle waiting for client input
         while ((bytes_read = read(fd_fifo_client_server, buffer, BUFFER_SIZE)) > 0) {
+            buffer[bytes_read] = '\0';
             if (DEBUG_STATUS) printf("[DEBUG] received '%s' from client\n", buffer);
             read_client_command(buffer);
             bzero(buffer, BUFFER_SIZE);
@@ -458,8 +456,24 @@ void write_task_output_to_client(int task_id)
     sprintf(buffer, "TASK #%d RESULT\n", task_id);
     write(fd_fifo_server_client, buffer, strlen(buffer));
 
-    while ((bytes_read = read(fd_result_output, buffer, BUFFER_SIZE)) > 0) {
-        write(fd_fifo_server_client, buffer, bytes_read);
+    switch (tasks_history[task_id-1]->status) {
+        case EXIT_STATUS_TERMINATED:
+            while ((bytes_read = read(fd_result_output, buffer, BUFFER_SIZE)) > 0) {
+                write(fd_fifo_server_client, buffer, bytes_read);
+            }
+            break;
+        case EXIT_STATUS_INACTIVITY:
+            strcpy(buffer, "TASK TERMINATED WITH EXIT_STATUS_INACTIVITY");
+            write(fd_fifo_server_client, buffer, strlen(buffer));
+            break;
+        case EXIT_STATUS_EXECUTION_TIME:
+            strcpy(buffer, "TASK TERMINATED WITH EXIT_STATUS_EXECUTION_TIME");
+            write(fd_fifo_server_client, buffer, strlen(buffer));
+            break;
+        case EXIT_STATUS_TERMINATED_INTERRUPTED:
+            strcpy(buffer, "TASK TERMINATED WITH EXIT_STATUS_TERMINATED_INTERRUPTED");
+            write(fd_fifo_server_client, buffer, strlen(buffer));
+            break;
     }
 
     write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
