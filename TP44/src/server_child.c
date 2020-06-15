@@ -11,14 +11,17 @@
 #include "../includes/auxs.h"
 #include "../includes/task.h"
 
-pid_t child_pid;
 int fd_result_output;
 
 int max_inactivity_time;
-int current_inactivity_time = 0;
 int max_execution_time;
 int current_execution_time = 0;
+pid_t* active_childs = NULL;
+int total_active_childs = 0;
 
+void remove_active_child (pid_t pid);
+void insert_active_child (pid_t pid);
+void kill_active_childs();
 int exec_command(char*);
 int exec_chained_commands(char*);
 
@@ -29,10 +32,11 @@ int exec_chained_commands(char*);
  * @brief           Signal usado para medir o tempo de execução de uma tarefa
  * @param signum    Identificador do signal recebido
  */
-void SIGALRM_handler_server_child(int signum)
+void SIGALRM_handler_execution_time(int signum)
 {
     current_execution_time++;
     if (current_execution_time > max_execution_time && max_execution_time >= 0) {
+        kill_active_childs();
         kill(getppid(), SIGUSR1);
         _exit(EXIT_STATUS_EXECUTION_TIME);
     }
@@ -46,10 +50,20 @@ void SIGALRM_handler_server_child(int signum)
  */
 void SIGINT_handler_server_child(int signum)
 {
-    kill(child_pid, SIGINT);
-    wait(NULL);
+    kill_active_childs();
     kill(getppid(), SIGUSR1);
     _exit(EXIT_STATUS_TERMINATED_INTERRUPTED);
+}
+
+/**
+ * @brief           Signal usado para indicar a interrupção de uma tarefa por tempo de inatividade
+ * @param signum    Identificador do signal recebido
+ */
+void SIGUSR1_handler_server_child(int signum)
+{
+    kill_active_childs();
+    kill(getppid(), SIGUSR1);
+    _exit(EXIT_STATUS_INACTIVITY);
 }
 
 
@@ -59,23 +73,9 @@ void SIGINT_handler_server_child(int signum)
  * @brief           Signal usado para medir o tempo de inatividade num pipe anónimo (apenas usado pelos filhos)
  * @param signum    Identificador do signal recebido
  */
-void SIGALRM_handler_server_child_command(int signum)
+void SIGALRM_handler_inactivity_time(int signum)
 {
-    current_inactivity_time++;
-    if (current_inactivity_time > max_inactivity_time && max_inactivity_time >= 0) {
-        _exit(EXIT_STATUS_INACTIVITY);
-    }
-
-    alarm(1);
-}
-
-/**
- * @brief           Signal usado para indicar a interrupção de uma tarefa (apenas usado pelos filhos)
- * @param signum    Identificador do signal recebido
- */
-void SIGINT_handler_server_child_command(int signum)
-{
-    kill(child_pid, SIGKILL);
+    kill(getppid(), SIGUSR1);
     _exit(0);
 }
 
@@ -89,8 +89,9 @@ void SIGINT_handler_server_child_command(int signum)
  */
 void server_child_start(int task_id, char* commands)
 {
-    signal(SIGALRM, SIGALRM_handler_server_child);
+    signal(SIGALRM, SIGALRM_handler_execution_time);
     signal(SIGINT, SIGINT_handler_server_child);
+    signal(SIGUSR1, SIGUSR1_handler_server_child);
 
     // Open task temporary output file
     char result_output_filename[BUFFER_SIZE];
@@ -105,6 +106,12 @@ void server_child_start(int task_id, char* commands)
     if (exec_chained_commands(commands) == -1)
         perror("Execute task");
 
+    // Wait for all the childs to complete their tasks
+    while (total_active_childs > 0) {
+        pid_t pid = wait(NULL);
+        remove_active_child(pid);
+    }
+
     // Warn server that task has been terminated
     kill(getppid(), SIGUSR1);
 
@@ -114,6 +121,33 @@ void server_child_start(int task_id, char* commands)
 
 
 //----------------------------SECONDARY FUNCTIONS----------------------------//
+
+void remove_active_child (pid_t pid)
+{
+    for (int i = 0; i < total_active_childs; i++) {
+        if (active_childs[i] == pid) {
+            active_childs[i] = active_childs[total_active_childs-1];
+            total_active_childs--;
+            active_childs = realloc(active_childs, total_active_childs * sizeof(pid_t));
+        }
+    }
+}
+
+void insert_active_child (pid_t pid)
+{
+    total_active_childs++;
+    active_childs = realloc(active_childs, total_active_childs * sizeof(pid_t));
+    active_childs[total_active_childs-1] = pid;
+}
+
+void kill_active_childs()
+{
+    while (total_active_childs > 0) {
+        kill(active_childs[0], SIGINT);
+        pid_t pid = wait(NULL);
+        remove_active_child(pid);
+    }
+}
 
 /**
  * @brief           Função que executa um comando
@@ -151,7 +185,8 @@ int exec_chained_commands (char* commands)
     int number_of_commands = strcnt(commands, '|') + 1;
     char* commands_array[number_of_commands];
     int p[number_of_commands-1][2];
-    int status [number_of_commands];
+    int p_inac[number_of_commands-1][2];
+    pid_t fork_pid;
 
     // Parse commands from a string
     for(int i = 0; i < number_of_commands; i++) {
@@ -166,7 +201,7 @@ int exec_chained_commands (char* commands)
     if (number_of_commands == 1) {
 
         // Create a child to run the command
-        pid_t fork_pid = fork();
+        fork_pid = fork();
         switch (fork_pid) {
             case -1:
                 perror("Fork");
@@ -175,62 +210,79 @@ int exec_chained_commands (char* commands)
                 dup2(fd_result_output, 1);
                 exec_command(commands_array[0]);
                 _exit(0);
-            default:
-                child_pid = fork_pid;
-                wait(&status[0]);
         }
+
+        insert_active_child(fork_pid);
     }
     else {
         for (int i = 0; i < number_of_commands; i++) {
 
             // First command execution
             if (i == 0) {
-
-                if (pipe(p[i]) != 0) {
+                if (pipe(p_inac[0]) != 0) {
                     perror("Pipe");
                     return -1;
                 }
 
                 // Create a child to run the command
-                pid_t fork_pid = fork();
+                fork_pid = fork();
                 switch(fork_pid) {
                     case -1:
                         perror("Fork");
                         return -1;
                     case 0:
-                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        close(p_inac[0][0]);
 
-                        close(p[i][0]);
+                        dup2(p_inac[0][1],1);
+                        close(p_inac[0][1]);
 
-                        dup2(p[i][1],1);
-                        close(p[i][1]);
+                        // Run the command
+                        exec_command(commands_array[0]);
+                        _exit(EXIT_STATUS_TERMINATED);
+                }
 
-                        // Create a child to run the command and start a timer to control pipe inactivity time
-                        fork_pid = fork();
-                        switch (fork_pid) {
-                            case -1:
-                                perror("Fork");
-                                return -1;
-                            case 0:
-                                exec_command(commands_array[i]);
-                            default:
-                                child_pid = fork_pid;
-                                kill(getpid(), SIGALRM);
+                insert_active_child(fork_pid);
+                close(p_inac[0][1]);
+
+                // Launch a child that receives input from the previous command and sends it to the next, messuring inactivity time
+                if (pipe(p[0]) != 0) {
+                    perror("Pipe");
+                    return -1;
+                }
+
+                fork_pid = fork();
+                switch(fork_pid) {
+                    case -1:
+                        perror("Fork");
+                        return -1;
+                    case 0:
+                        if (max_inactivity_time > 0) {
+                            signal(SIGALRM, SIGALRM_handler_inactivity_time);
+                            alarm(max_inactivity_time);
                         }
 
-                        wait(NULL);
-                        _exit(EXIT_STATUS_TERMINATED);
-                    default:
-                        child_pid = fork_pid;
-                        close(p[i][1]);
+                        close(p[0][0]);
 
+                        size_t bytes_read;
+                        char buffer[BUFFER_SIZE];
+                        while ((bytes_read = read(p_inac[0][0], buffer, BUFFER_SIZE)) > 0)
+                            write(p[0][1], buffer, bytes_read);
+
+                        close(p[0][1]);
+                        close(p_inac[0][0]);
+
+                        _exit(0);
                 }
+
+                insert_active_child(fork_pid);
+                close(p_inac[0][0]);
+                close(p[0][1]);
             }
             // Last command execution
             else if (i == number_of_commands-1) {
 
                 // Create a child to run the command
-                pid_t fork_pid = fork();
+                fork_pid = fork();
                 switch(fork_pid) {
                     case -1:
                         perror("Fork");
@@ -242,69 +294,77 @@ int exec_chained_commands (char* commands)
                         dup2(fd_result_output, 1);
 
                         exec_command(commands_array[i]);
-                    default:
-                        child_pid = fork_pid;
-                        close(p[i-1][0]);
-
+                        _exit(EXIT_STATUS_TERMINATED);
                 }
+
+                insert_active_child(fork_pid);
+                close(p[i-1][0]);
             }
             // Intermediate command(s) execution
             else {
 
-                if (pipe(p[i]) != 0) {
+                if (pipe(p_inac[i]) != 0) {
                     perror("Pipe");
                     return -1;
                 }
 
                 // Create a child to run the command
-                pid_t fork_pid = fork();
+                fork_pid = fork();
                 switch(fork_pid) {
                     case -1:
                         perror("Fork");
                         return -1;
                     case 0:
-                        signal(SIGALRM, SIGALRM_handler_server_child_command);
+                        close(p_inac[i][0]);
 
-                        close(p[i][0]);
-
-                        dup2(p[i][1],1);
-                        close(p[i][1]);
+                        dup2(p_inac[i][1],1);
+                        close(p_inac[i][1]);
 
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
-                        // Create a child to run the command and start a timer to control pipe inactivity time
-                        fork_pid = fork();
-                        switch (fork_pid) {
-                            case -1:
-                                perror("Fork");
-                                return -1;
-                            case 0:
-                                exec_command(commands_array[i]);
-                            default:
-                                child_pid = fork_pid;
-                                kill(getpid(), SIGALRM);
-                        }
-
-                        wait(NULL);
+                        exec_command(commands_array[i]);
                         _exit(EXIT_STATUS_TERMINATED);
-                    default:
-                        child_pid = fork_pid;
+                }
+
+                insert_active_child(fork_pid);
+                close(p[i-1][0]);
+                close(p_inac[i][1]);
+
+                // Launch a child that receives input from the previous command and sends it to the next, messuring inactivity time
+                if (pipe(p[i]) != 0) {
+                    perror("Pipe");
+                    return -1;
+                }
+
+                fork_pid = fork();
+                switch(fork_pid) {
+                    case -1:
+                        perror("Fork");
+                        return -1;
+                    case 0:
+                    if (max_inactivity_time > 0) {
+                        signal(SIGALRM, SIGALRM_handler_inactivity_time);
+                        alarm(max_inactivity_time);
+                    }
+
+                        close(p[i][0]);
+
+                        size_t bytes_read;
+                        char buffer[BUFFER_SIZE];
+                        while ((bytes_read = read(p_inac[i][1], buffer, BUFFER_SIZE)) > 0)
+                            write(p[i][0], buffer, bytes_read);
+
                         close(p[i][1]);
-                        close(p[i-1][0]);
+                        close(p_inac[i][0]);
 
+                        _exit(0);
                 }
-            }
 
-            // Wait for child to execute a command and interprete its exit status
-            wait(&status[i]);
-            if (WIFEXITED(status[i])) {
-                if (WEXITSTATUS(status[i]) == EXIT_STATUS_INACTIVITY) {
-                    kill(getppid(), SIGUSR1);
-                    _exit(EXIT_STATUS_INACTIVITY);
-                }
+                insert_active_child(fork_pid);
+                close(p_inac[i][0]);
+                close(p[i][1]);
             }
-
         }
     }
 

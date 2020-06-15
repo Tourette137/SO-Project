@@ -326,7 +326,7 @@ void remove_task_from_server (int task_id, int task_running_ind, int terminated_
     // Remove task from server current running tasks
     tasks_running[task_running_ind] = tasks_running[total_tasks_running-1];
     total_tasks_running--;
-    tasks_running = realloc(tasks_running, total_tasks_running);
+    tasks_running = realloc(tasks_running, total_tasks_running * sizeof(TASK));
 }
 
 
