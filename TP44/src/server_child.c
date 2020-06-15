@@ -225,7 +225,7 @@ int exec_chained_commands (char* commands)
                 }
 
 
-                // Launch a child that receives input from the previous command and sends it to the next, messuring inactivity time
+                // Launch a child that receives input from the previous command and sends it to the next, messuring pipe inactivity time
                 if (pipe(p[0]) != 0) {
                     perror("Pipe");
                     return -1;
@@ -246,8 +246,10 @@ int exec_chained_commands (char* commands)
 
                         size_t bytes_read;
                         char buffer[BUFFER_SIZE];
-                        while ((bytes_read = read(p_inac[0][0], buffer, BUFFER_SIZE)) > 0)
+                        while ((bytes_read = read(p_inac[0][0], buffer, BUFFER_SIZE)) > 0) {
+                            alarm(0);
                             write(p[0][1], buffer, bytes_read);
+                        }
 
                         close(p[0][1]);
                         close(p_inac[0][0]);
@@ -319,7 +321,7 @@ int exec_chained_commands (char* commands)
                 current_execution_pid = next_execution_pid;
 
 
-                // Launch a child that receives input from the previous command and sends it to the next, messuring inactivity time
+                // Launch a child that receives input from the previous command and sends it to the next, messuring pipe inactivity time
                 if (pipe(p[i]) != 0) {
                     perror("Pipe");
                     return -1;
@@ -340,8 +342,10 @@ int exec_chained_commands (char* commands)
 
                         size_t bytes_read;
                         char buffer[BUFFER_SIZE];
-                        while ((bytes_read = read(p_inac[i][0], buffer, BUFFER_SIZE)) > 0)
+                        while ((bytes_read = read(p_inac[i][0], buffer, BUFFER_SIZE)) > 0) {
+                            alarm(0);
                             write(p[i][1], buffer, bytes_read);
+                        }
 
                         close(p[i][1]);
                         close(p_inac[i][0]);

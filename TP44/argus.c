@@ -73,7 +73,6 @@ int main(int argc, char const** argv)
         // Send command to server
         write(fd_fifo_client_server, buffer, strlen(buffer));
         if (DEBUG_STATUS) printf("[DEBUG] wrote '%s' to fifo\n", buffer);
-        close(fd_fifo_client_server);
 
         // Wait for server to finish command execution
         pause();
