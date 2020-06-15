@@ -15,7 +15,7 @@ int fd_result_output;
 
 int max_inactivity_time;
 int max_execution_time;
-int current_execution_time = 0;
+
 pid_t current_execution_pid = -1;
 pid_t current_execution_control_pid = -1;
 pid_t next_execution_pid = -1;
@@ -64,7 +64,7 @@ void SIGUSR1_handler_server_child(int signum)
 //----------------------------CHILD SIGNAL HANDLERS----------------------------//
 
 /**
- * @brief           Signal usado para medir o tempo de inatividade num pipe anónimo (apenas usado pelos filhos)
+ * @brief           Signal usado para medir o tempo de inatividade num pipe anónimo (apenas usado pelos filhos de controlo)
  * @param signum    Identificador do signal recebido
  */
 void SIGALRM_handler_inactivity_time(int signum)
@@ -121,6 +121,9 @@ void server_child_start(int task_id, char* commands)
 
 //----------------------------SECONDARY FUNCTIONS----------------------------//
 
+/**
+ * @brief   Função que mata os filhos ativos (que estão em execução no momento)
+ */
 void kill_active_childs()
 {
     if (current_execution_pid != -1) kill(current_execution_pid, SIGKILL);
@@ -135,10 +138,10 @@ void kill_active_childs()
  */
 int exec_command (char* command)
 {
-    int number_of_args = strcnt(command, ' ') + 1;
-    char* exec_args[number_of_args];
-    char* string;
-    int exec_ret = 0, i = 0;
+    int number_of_args = strcnt(command, ' ') + 1;  // Number of arguments in the command
+    char* exec_args[number_of_args];                // Array with the command arguments
+    char* string;                                   // Auxiliary pointer to help command parsing
+    int exec_ret = 0, i = 0;                        // Variables to store return value and iteration index
 
     string = strtok(command, " ");
     while (string != NULL) {
@@ -160,15 +163,15 @@ int exec_command (char* command)
  */
 int exec_chained_commands (char* commands)
 {
-    char* line;
-    int number_of_commands = strcnt(commands, '|') + 1;
-    char* commands_array[number_of_commands];
-    int p[number_of_commands-1][2];
-    int p_inac[number_of_commands-1][2];
-    pid_t fork_pid;
+    int number_of_commands = strcnt(commands, '|') + 1; // Number of commands to be executed
+    char* commands_array[number_of_commands];           // Array to store the commands
+    int p_inac[number_of_commands-1][2];                // Pipes for command-child -> control-child communication
+    int p[number_of_commands-1][2];                     // Pipes for control-child -> command-child communication
+    pid_t fork_pid;                                     // Variable to temporarly store fork PID's
 
     // Parse commands from a string
     for(int i = 0; i < number_of_commands; i++) {
+        char* line;
         line = strsep(&commands,"|");
         commands_array[i] = strdup(line);
     }
@@ -197,7 +200,7 @@ int exec_chained_commands (char* commands)
     else {
         for (int i = 0; i < number_of_commands; i++) {
 
-            // First command execution
+            //--------------First command execution--------------
             if (i == 0) {
                 if (pipe(p_inac[0]) != 0) {
                     perror("Pipe");
@@ -211,6 +214,7 @@ int exec_chained_commands (char* commands)
                         perror("Fork");
                         return -1;
                     case 0:
+                        ///// COMMAND CHILD CODE /////
                         close(p_inac[0][0]);
 
                         dup2(p_inac[0][1],1);
@@ -225,7 +229,7 @@ int exec_chained_commands (char* commands)
                 }
 
 
-                // Launch a child that receives input from the previous command and sends it to the next, messuring pipe inactivity time
+                // Create a child that receives input from the previous command and sends it to the next, messuring pipe inactivity time
                 if (pipe(p[0]) != 0) {
                     perror("Pipe");
                     return -1;
@@ -237,6 +241,8 @@ int exec_chained_commands (char* commands)
                         perror("Fork");
                         return -1;
                     case 0:
+                        ///// CONTROL CHILD CODE /////
+                        // If max_inactivity_time is enabled, sets a timer
                         if (max_inactivity_time > 0) {
                             signal(SIGALRM, SIGALRM_handler_inactivity_time);
                             alarm(max_inactivity_time);
@@ -246,8 +252,9 @@ int exec_chained_commands (char* commands)
 
                         size_t bytes_read;
                         char buffer[BUFFER_SIZE];
+                        // Reads from the previous pipe and resets the inactivity timer when something is read
                         while ((bytes_read = read(p_inac[0][0], buffer, BUFFER_SIZE)) > 0) {
-                            alarm(0);
+                            alarm(max_inactivity_time);
                             write(p[0][1], buffer, bytes_read);
                         }
 
@@ -261,7 +268,7 @@ int exec_chained_commands (char* commands)
                         close(p[0][1]);
                 }
             }
-            // Last command execution
+            //--------------Last command execution--------------
             else if (i == number_of_commands-1) {
 
                 // Create a child to run the command
@@ -271,6 +278,7 @@ int exec_chained_commands (char* commands)
                         perror("Fork");
                         return -1;
                     case 0:
+                        ///// COMMAND CHILD CODE /////
                         dup2(p[i-1][0],0);
                         close(p[i-1][0]);
 
@@ -283,7 +291,7 @@ int exec_chained_commands (char* commands)
                         close(p[i-1][0]);
                 }
             }
-            // Intermediate command(s) execution
+            //--------------Intermediate command(s) execution--------------
             else {
 
                 if (pipe(p_inac[i]) != 0) {
@@ -298,6 +306,7 @@ int exec_chained_commands (char* commands)
                         perror("Fork");
                         return -1;
                     case 0:
+                        ///// COMMAND CHILD CODE /////
                         close(p_inac[i][0]);
 
                         dup2(p_inac[i][1],1);
@@ -315,13 +324,13 @@ int exec_chained_commands (char* commands)
                 }
 
 
-                // Wait for previous child to terminate execution to launch next childs
+                // Wait for previous command to terminate execution to launch next childs
                 waitpid(current_execution_pid, NULL, 0);
                 waitpid(current_execution_control_pid, NULL, 0);
                 current_execution_pid = next_execution_pid;
 
 
-                // Launch a child that receives input from the previous command and sends it to the next, messuring pipe inactivity time
+                // Create a child that receives input from the previous command and sends it to the next, messuring pipe inactivity time
                 if (pipe(p[i]) != 0) {
                     perror("Pipe");
                     return -1;
@@ -333,6 +342,8 @@ int exec_chained_commands (char* commands)
                         perror("Fork");
                         return -1;
                     case 0:
+                        ///// CONTROL CHILD CODE /////
+                        // If max_inactivity_time is enabled, sets a timer
                         if (max_inactivity_time > 0) {
                             signal(SIGALRM, SIGALRM_handler_inactivity_time);
                             alarm(max_inactivity_time);
@@ -342,8 +353,9 @@ int exec_chained_commands (char* commands)
 
                         size_t bytes_read;
                         char buffer[BUFFER_SIZE];
+                        // Reads from the previous pipe and resets the inactivity timer when something is read
                         while ((bytes_read = read(p_inac[i][0], buffer, BUFFER_SIZE)) > 0) {
-                            alarm(0);
+                            alarm(max_inactivity_time);
                             write(p[i][1], buffer, bytes_read);
                         }
 

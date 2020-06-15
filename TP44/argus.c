@@ -106,6 +106,9 @@ int main(int argc, char const** argv)
 
 //----------------------------SECONDARY FUNCTIONS----------------------------//
 
+/**
+ * @brief       Função que envia o PID do cliente para o servidor, através de um pipe com nome
+ */
 void send_pid_to_server()
 {
     char buffer[BUFFER_SIZE];

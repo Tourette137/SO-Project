@@ -16,6 +16,7 @@ int fd_fifo_server_client;
 
 int max_inactivity_time = -1;
 int max_execution_time = -1;
+
 TASK* tasks_history = NULL;
 int total_tasks_history = 0;
 TASK* tasks_running = NULL;
@@ -47,7 +48,7 @@ void SIGUSR1_handler(int signum)
     int status;
     int pid = wait(&status);
 
-    // Server finds the task corresponding to the pid and sets its status accordingly to the exit status of the child
+    // Server finds the task corresponding to the PID received and sets its status accordingly to the exit status of the child
     for(int i = 0; i < total_tasks_running; i++) {
         if(tasks_running[i]->pid == pid) {
             int task_id = tasks_running[i]->id;
@@ -159,7 +160,6 @@ int main(int argc, char const** argv)
     // Run cicle, waiting for input from the client
     while (1) {
 
-        bzero(buffer, BUFFER_SIZE);
 
         // Open pipe for client->server communication
         if ((fd_fifo_client_server = open(CLIENT_SERVER_PIPENAME, O_RDONLY)) == -1) {
@@ -182,6 +182,7 @@ int main(int argc, char const** argv)
         // Get client PID
         read_pid_from_client();
 
+        bzero(buffer, BUFFER_SIZE);
         // Run cicle waiting for client input
         while ((bytes_read = read(fd_fifo_client_server, buffer, BUFFER_SIZE)) > 0) {
             buffer[bytes_read] = '\0';
@@ -202,7 +203,7 @@ int main(int argc, char const** argv)
 //----------------------------SECONDARY FUNCTIONS----------------------------//
 
 /**
- * @brief       Função que lê o PID do cliente
+ * @brief       Função que recebe o PID do cliente através de um pipe com nome
  */
 void read_pid_from_client()
 {
@@ -311,8 +312,8 @@ void launch_task_on_server(char* command)
 }
 
 /**
- * @brief           Função que altera o tempo de Inatividade Máxima de comunicação entre um pipe anónimo
- * @param seconds   Tempo de inatividade máxima (em segundos)
+ * @brief           Função que altera o tempo máximo de inatividade de comunicação entre em pipes anónimos
+ * @param seconds   Tempo de inatividade máximo (em segundos)
  */
 void change_max_inactivity_time (int seconds)
 {
@@ -320,8 +321,8 @@ void change_max_inactivity_time (int seconds)
 }
 
 /**
- * @brief           Função que altera o tempo de Execução Máxima de uma Tarefa
- * @param seconds   Tempo de execução máxima (em segundos)
+ * @brief           Função que altera o tempo máximo de execução de uma tarefa
+ * @param seconds   Tempo de execução máximo (em segundos)
  */
 void change_max_execution_time (int seconds)
 {
@@ -329,9 +330,9 @@ void change_max_execution_time (int seconds)
 }
 
 /**
- * @brief                       Função que remove uma tarefa dos registos de tarefas do servidor
- * @param task_id               ID da tarefa que queremos remover
- * @param task_running_ind      Índice da tarefa no registo de tarefas a ser executadas do servidor
+ * @brief                       Função que remove uma tarefa do registo de tarefas em execução e altera o seu estado no registo do historial de tarefas do servidor
+ * @param task_id               ID da tarefa a ser removida
+ * @param task_running_ind      Índice da tarefa no registo de tarefas em execução do servidor
  * @param terminated_status     Estado de término da tarefa
  */
 void remove_task_from_server (int task_id, int task_running_ind, int terminated_status)
@@ -552,9 +553,6 @@ void write_output_to_client(char* command)
         written_bytes += sprintf(buffer+written_bytes, "output\n");
 
         write(fd_fifo_server_client, buffer, written_bytes);
-    }
-    else {
-        write(fd_fifo_server_client, " ", 1);
     }
 
     write(fd_fifo_server_client, PIPE_COMMUNICATION_EOF, PIPE_COMMUNICATION_EOF_SIZE);
