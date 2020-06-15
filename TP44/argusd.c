@@ -21,6 +21,7 @@ int total_tasks_history = 0;
 TASK* tasks_running = NULL;
 int total_tasks_running = 0;
 
+void read_pid_from_client();
 void read_client_command(char*);
 void add_task_to_server(char*);
 void launch_task_on_server(char*);
@@ -179,8 +180,7 @@ int main(int argc, char const** argv)
         }
 
         // Get client PID
-        read(fd_fifo_client_server, buffer, BUFFER_SIZE);
-        client_pid = atoi(buffer);
+        read_pid_from_client();
 
         // Run cicle waiting for client input
         while ((bytes_read = read(fd_fifo_client_server, buffer, BUFFER_SIZE)) > 0) {
@@ -200,6 +200,22 @@ int main(int argc, char const** argv)
 
 
 //----------------------------SECONDARY FUNCTIONS----------------------------//
+
+/**
+ * @brief       Função que lê o PID do cliente
+ */
+void read_pid_from_client()
+{
+    char buffer[BUFFER_SIZE];
+    int fd_pid_communication_pipe;
+
+    // Tries to open a FIFO to read the client PID and deletes it in the end
+    while ((fd_pid_communication_pipe = open(PID_COMMUNICATION_PIPENAME, O_RDONLY)) == -1);
+    read(fd_pid_communication_pipe, buffer, BUFFER_SIZE);
+    client_pid = atoi(buffer);
+    close(fd_pid_communication_pipe);
+    remove_file(PID_COMMUNICATION_PIPENAME);
+}
 
 /**
  * @brief           Função que recebe um comando(simplificado), interpreta-o e executa-o
@@ -533,6 +549,7 @@ void write_output_to_client(char* command)
         written_bytes += sprintf(buffer+written_bytes, "listar\n");
         written_bytes += sprintf(buffer+written_bytes, "terminar #tarefa\n");
         written_bytes += sprintf(buffer+written_bytes, "historico\n");
+        written_bytes += sprintf(buffer+written_bytes, "output\n");
 
         write(fd_fifo_server_client, buffer, written_bytes);
     }

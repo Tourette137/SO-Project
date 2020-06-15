@@ -3,6 +3,7 @@
 // FILE OR PIPE NAMES MACROS
 #define CLIENT_SERVER_PIPENAME "client_server_pipe"
 #define SERVER_CLIENT_PIPENAME "server_client_pipe"
+#define PID_COMMUNICATION_PIPENAME "pid_pipe"
 #define ERROR_FILENAME "error.txt"
 #define TASK_RESULT_OUTPUT_FILENAME "task_result_output_"
 #define LOG_FILENAME "log.txt"

@@ -12,6 +12,7 @@ int execution_mode;
 int fd_fifo_client_server;
 int fd_fifo_server_client;
 
+void send_pid_to_server();
 void simplify_command(char*, size_t);
 void read_output_from_server();
 
@@ -55,8 +56,7 @@ int main(int argc, char const** argv)
         printf("[DEBUG] opened FIFO for reading\n");
 
     // Send client pid to server
-    sprintf(buffer, "%d", getpid());
-    write(fd_fifo_client_server, buffer, strlen(buffer));
+    send_pid_to_server();
 
     // Set current execution mode
     execution_mode = argc > 1 ? COMMAND_LINE_EXECUTION_MODE : INTERPRETER_EXECUTION_MODE;
@@ -73,6 +73,7 @@ int main(int argc, char const** argv)
         // Send command to server
         write(fd_fifo_client_server, buffer, strlen(buffer));
         if (DEBUG_STATUS) printf("[DEBUG] wrote '%s' to fifo\n", buffer);
+        close(fd_fifo_client_server);
 
         // Wait for server to finish command execution
         pause();
@@ -106,6 +107,19 @@ int main(int argc, char const** argv)
 
 //----------------------------SECONDARY FUNCTIONS----------------------------//
 
+void send_pid_to_server()
+{
+    char buffer[BUFFER_SIZE];
+    int fd_pid_communication_pipe;
+
+    // Creates a FIFO to send the client PID to the server
+    mkfifo(PID_COMMUNICATION_PIPENAME, 0666);
+    fd_pid_communication_pipe = open(PID_COMMUNICATION_PIPENAME, O_WRONLY);
+    sprintf(buffer, "%d", getpid());
+    write(fd_pid_communication_pipe, buffer, strlen(buffer));
+    close(fd_pid_communication_pipe);
+}
+
 /**
  * @brief   Função que recebe, do servidor, o output de uma tarefa ou comando
  */
@@ -117,7 +131,7 @@ void read_output_from_server()
     write(1,"\n\n",2);
 
     while (1) {
-        // Read output send from server
+        // Read output sent from server
         bzero(buffer, BUFFER_SIZE);
         bytes_read = read(fd_fifo_server_client, buffer, BUFFER_SIZE);
 

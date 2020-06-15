@@ -16,11 +16,10 @@ int fd_result_output;
 int max_inactivity_time;
 int max_execution_time;
 int current_execution_time = 0;
-pid_t* active_childs = NULL;
-int total_active_childs = 0;
+pid_t current_execution_pid = -1;
+pid_t current_execution_control_pid = -1;
+pid_t next_execution_pid = -1;
 
-void remove_active_child (pid_t pid);
-void insert_active_child (pid_t pid);
 void kill_active_childs();
 int exec_command(char*);
 int exec_chained_commands(char*);
@@ -34,14 +33,9 @@ int exec_chained_commands(char*);
  */
 void SIGALRM_handler_execution_time(int signum)
 {
-    current_execution_time++;
-    if (current_execution_time > max_execution_time && max_execution_time >= 0) {
-        kill_active_childs();
-        kill(getppid(), SIGUSR1);
-        _exit(EXIT_STATUS_EXECUTION_TIME);
-    }
-
-    alarm(1);
+    kill_active_childs();
+    kill(getppid(), SIGUSR1);
+    _exit(EXIT_STATUS_EXECUTION_TIME);
 }
 
 /**
@@ -106,10 +100,15 @@ void server_child_start(int task_id, char* commands)
     if (exec_chained_commands(commands) == -1)
         perror("Execute task");
 
-    // Wait for all the childs to complete their tasks
-    while (total_active_childs > 0) {
+    // Wait for all the active childs to complete their tasks
+    while (current_execution_pid != -1 || current_execution_control_pid != -1 || next_execution_pid != -1) {
         pid_t pid = wait(NULL);
-        remove_active_child(pid);
+        if (pid == current_execution_pid)
+            current_execution_pid = -1;
+        else if (pid == current_execution_control_pid)
+            current_execution_control_pid = -1;
+        else if (pid == next_execution_pid)
+            next_execution_pid = -1;
     }
 
     // Warn server that task has been terminated
@@ -122,31 +121,11 @@ void server_child_start(int task_id, char* commands)
 
 //----------------------------SECONDARY FUNCTIONS----------------------------//
 
-void remove_active_child (pid_t pid)
-{
-    for (int i = 0; i < total_active_childs; i++) {
-        if (active_childs[i] == pid) {
-            active_childs[i] = active_childs[total_active_childs-1];
-            total_active_childs--;
-            active_childs = realloc(active_childs, total_active_childs * sizeof(pid_t));
-        }
-    }
-}
-
-void insert_active_child (pid_t pid)
-{
-    total_active_childs++;
-    active_childs = realloc(active_childs, total_active_childs * sizeof(pid_t));
-    active_childs[total_active_childs-1] = pid;
-}
-
 void kill_active_childs()
 {
-    while (total_active_childs > 0) {
-        kill(active_childs[0], SIGINT);
-        pid_t pid = wait(NULL);
-        remove_active_child(pid);
-    }
+    if (current_execution_pid != -1) kill(current_execution_pid, SIGKILL);
+    if (current_execution_control_pid != -1) kill(current_execution_control_pid, SIGKILL);
+    if (next_execution_pid != -1) kill(next_execution_pid, SIGKILL);
 }
 
 /**
@@ -195,7 +174,8 @@ int exec_chained_commands (char* commands)
     }
 
     // Start a timer to control task execution time
-    kill(getpid(), SIGALRM);
+    if (max_execution_time > 0)
+        alarm(max_execution_time);
 
     // Command(s) execution
     if (number_of_commands == 1) {
@@ -212,7 +192,7 @@ int exec_chained_commands (char* commands)
                 _exit(0);
         }
 
-        insert_active_child(fork_pid);
+        current_execution_pid = fork_pid;
     }
     else {
         for (int i = 0; i < number_of_commands; i++) {
@@ -239,10 +219,11 @@ int exec_chained_commands (char* commands)
                         // Run the command
                         exec_command(commands_array[0]);
                         _exit(EXIT_STATUS_TERMINATED);
+                    default:
+                        current_execution_pid = fork_pid;
+                        close(p_inac[0][1]);
                 }
 
-                insert_active_child(fork_pid);
-                close(p_inac[0][1]);
 
                 // Launch a child that receives input from the previous command and sends it to the next, messuring inactivity time
                 if (pipe(p[0]) != 0) {
@@ -272,11 +253,11 @@ int exec_chained_commands (char* commands)
                         close(p_inac[0][0]);
 
                         _exit(0);
+                    default:
+                        current_execution_control_pid = fork_pid;
+                        close(p_inac[0][0]);
+                        close(p[0][1]);
                 }
-
-                insert_active_child(fork_pid);
-                close(p_inac[0][0]);
-                close(p[0][1]);
             }
             // Last command execution
             else if (i == number_of_commands-1) {
@@ -295,10 +276,10 @@ int exec_chained_commands (char* commands)
 
                         exec_command(commands_array[i]);
                         _exit(EXIT_STATUS_TERMINATED);
+                    default:
+                        next_execution_pid = fork_pid;
+                        close(p[i-1][0]);
                 }
-
-                insert_active_child(fork_pid);
-                close(p[i-1][0]);
             }
             // Intermediate command(s) execution
             else {
@@ -325,11 +306,18 @@ int exec_chained_commands (char* commands)
 
                         exec_command(commands_array[i]);
                         _exit(EXIT_STATUS_TERMINATED);
+                    default:
+                        next_execution_pid = fork_pid;
+                        close(p[i-1][0]);
+                        close(p_inac[i][1]);
                 }
 
-                insert_active_child(fork_pid);
-                close(p[i-1][0]);
-                close(p_inac[i][1]);
+
+                // Wait for previous child to terminate execution to launch next childs
+                waitpid(current_execution_pid, NULL, 0);
+                waitpid(current_execution_control_pid, NULL, 0);
+                current_execution_pid = next_execution_pid;
+
 
                 // Launch a child that receives input from the previous command and sends it to the next, messuring inactivity time
                 if (pipe(p[i]) != 0) {
@@ -343,27 +331,27 @@ int exec_chained_commands (char* commands)
                         perror("Fork");
                         return -1;
                     case 0:
-                    if (max_inactivity_time > 0) {
-                        signal(SIGALRM, SIGALRM_handler_inactivity_time);
-                        alarm(max_inactivity_time);
-                    }
+                        if (max_inactivity_time > 0) {
+                            signal(SIGALRM, SIGALRM_handler_inactivity_time);
+                            alarm(max_inactivity_time);
+                        }
 
                         close(p[i][0]);
 
                         size_t bytes_read;
                         char buffer[BUFFER_SIZE];
-                        while ((bytes_read = read(p_inac[i][1], buffer, BUFFER_SIZE)) > 0)
-                            write(p[i][0], buffer, bytes_read);
+                        while ((bytes_read = read(p_inac[i][0], buffer, BUFFER_SIZE)) > 0)
+                            write(p[i][1], buffer, bytes_read);
 
                         close(p[i][1]);
                         close(p_inac[i][0]);
 
                         _exit(0);
+                    default:
+                        current_execution_control_pid = fork_pid;
+                        close(p_inac[i][0]);
+                        close(p[i][1]);
                 }
-
-                insert_active_child(fork_pid);
-                close(p_inac[i][0]);
-                close(p[i][1]);
             }
         }
     }
