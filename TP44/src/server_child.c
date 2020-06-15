@@ -7,9 +7,8 @@
 #include <sys/stat.h>
 #include <signal.h>
 
-#include "../includes/macros.h"
+#include "../argus.h"
 #include "../includes/auxs.h"
-#include "../includes/task.h"
 
 int fd_result_output;
 

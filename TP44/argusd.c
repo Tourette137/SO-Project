@@ -8,6 +8,9 @@
 #include <signal.h>
 
 #include "argus.h"
+#include "includes/task.h"
+#include "includes/auxs.h"
+#include "includes/server_child.h"
 
 pid_t client_pid;
 int default_fd_error;

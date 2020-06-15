@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 
 #include "argus.h"
+#include "includes/auxs.h"
 
 int execution_mode;
 int fd_fifo_client_server;
